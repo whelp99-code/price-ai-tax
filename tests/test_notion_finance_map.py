@@ -3,7 +3,9 @@ from datetime import date
 
 import pytest
 
-from price.notion_finance_map import apply_external_amount_conflict, map_row, map_snapshot
+from pathlib import Path
+
+from price.notion_finance_map import Hold, apply_external_amount_conflict, map_row, map_snapshot, purchase_match_verdict
 
 
 def _row(**props):
@@ -102,6 +104,29 @@ def test_event_date_from_processed_field():
 def test_unknown_classification():
     held = map_row(_row(구분="내부이체"))
     assert held.held
+
+
+def test_verdict_fails_on_hardcoded_pass_string():
+    hold = Hold(
+        "3bb33ddb-7425-8114-8769-d2a1e0c9bac2",
+        "매입",
+        "amounts conflict",
+        3300000,
+        330000,
+        3630000,
+        approval_tail="0855",
+        counterparty="주식회사 넥시아스",
+        external_gross=3300000,
+    )
+    result = purchase_match_verdict(191_611_200, 194_911_200, [hold])
+    blob = f"{result['status']} {result['hold_explains']}"
+    assert result["status"] == "FAIL"
+    assert result["gap"] == 3_300_000
+    assert "PASS after hold resolved" not in blob
+    assert "HOLD_EXPLAINS: 주식회사 넥시아스 …0855 held 3,630,000 vs Hometax 3,300,000 → gap closes if resolved" == result["hold_explains"]
+    assert purchase_match_verdict(194_911_200, 194_911_200, [])["status"] == "PASS"
+    script = Path(__file__).resolve().parents[1].joinpath("scripts/notion_finance_s2.py").read_text()
+    assert "PASS after hold resolved" not in script
 
 
 def test_missing_bank_tax_is_zero_not_invented_invoice_tax():

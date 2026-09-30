@@ -14,7 +14,7 @@ from pathlib import Path
 from price.auth import Actor
 from price.db import Database, digest
 from price.models import CompanyInput
-from price.notion_finance_map import MapReport, Mapped, map_snapshot
+from price.notion_finance_map import MapReport, Mapped, map_snapshot, purchase_match_verdict
 from price.service import Service
 
 FORBIDDEN = {
@@ -176,6 +176,7 @@ def reconciliation(report: MapReport, hometax: dict[str, tuple[int, int, int]], 
     hometax_gross = sum(item[2] for item in hometax.values())
     held_gross = sum(item.gross or 0 for item in report.holds if item.classification == "매입")
     loaded_gross = report.purchase_loaded_gross()
+    verdict = purchase_match_verdict(loaded_gross, hometax_gross, report.holds)
     lines = [
         "| item | value | status |",
         "|---|---:|---|",
@@ -186,7 +187,8 @@ def reconciliation(report: MapReport, hometax: dict[str, tuple[int, int, int]], 
         f"| hometax purchase rows | {len(hometax)} | xlsx |",
         f"| hometax purchase gross | {hometax_gross} | target |",
         "| hometax target vs loaded | "
-        + f"{hometax_gross} vs {loaded_gross} | PASS after hold resolved |",
+        + f"{hometax_gross} vs {loaded_gross} | {verdict['status']} gap={verdict['gap']} |",
+        f"| hold_explains |  | {verdict['hold_explains']} |",
         "| sales external match | "
         + f"{report.by_class.get('매출', 0)} rows | NOT_RUN |",
         "| core5 8-row OUT 96536000 | not used | not the purchase total |",

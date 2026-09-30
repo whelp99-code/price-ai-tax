@@ -35,6 +35,8 @@ class Hold:
     tax: int | None = None
     gross: int | None = None
     approval_tail: str = ""
+    counterparty: str = ""
+    external_gross: int | None = None
 
     @property
     def held(self) -> bool:
@@ -223,7 +225,34 @@ def apply_external_amount_conflict(
         item.tax,
         item.gross,
         approval_tail=item.approval[-4:],
+        counterparty=item.draft.counterparty,
+        external_gross=observed[2],
     )
+
+
+def purchase_match_verdict(loaded_gross: int, hometax_gross: int, holds: list[Hold]) -> dict[str, str | int]:
+    """PASS only when loaded purchase gross equals the Hometax total.
+
+    HOLD_EXPLAINS is a separate field. It is never a pass.
+    """
+    gap = hometax_gross - loaded_gross
+    status = "PASS" if gap == 0 else "FAIL"
+    parts = []
+    explained = 0
+    for hold in holds:
+        if hold.classification != "매입" or hold.external_gross is None or hold.gross is None:
+            continue
+        explained += hold.external_gross
+        label = hold.counterparty or "held"
+        parts.append(
+            f"HOLD_EXPLAINS: {label} …{hold.approval_tail} held {hold.gross:,} vs Hometax {hold.external_gross:,}"
+        )
+    explains = ""
+    if status == "FAIL" and parts:
+        closes = explained == gap
+        tail = "gap closes if resolved" if closes else f"explained {explained:,} does not equal gap {gap:,}"
+        explains = "; ".join(parts) + f" → {tail}"
+    return {"status": status, "gap": gap, "hold_explains": explains}
 
 
 def map_snapshot(
