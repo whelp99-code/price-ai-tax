@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="3" skipped="0" tests="4" time="0.565" timestamp="2026-09-28T16:59:16.167219+09:00" hostname="jm-acloud"><testcase classname="tests.test_ubuntu_hardening" name="test_worker_does_not_erase_transaction_author_for_approval" time="0.472"><failure message="Failed: DID NOT RAISE &lt;class 'price.db.DomainError'&gt;">w = World(db=&lt;price.db.Database object at 0x73af658d1a90&gt;, svc=&lt;price.service.Service object at 0x73af658d1bd0&gt;, company='...b873e12558a4fe8', username='other-owner', csrf='', worker=False), evidence='evidence_9240ceac8a88407f9792c4577714dc12')
+
+    def test_worker_does_not_erase_transaction_author_for_approval(w):
+        tx=w.tx();q=Queue(w.svc);q.enqueue(w.owner,w.company,tx['id'])
+        j=q.run_once(w.company)['result']['journal']
+&gt;       with pytest.raises(DomainError) as err:
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE &lt;class 'price.db.DomainError'&gt;
+
+tests/test_ubuntu_hardening.py:11: Failed</failure></testcase><testcase classname="tests.test_ubuntu_hardening" name="test_other_analyzer_does_not_allow_source_author_self_approval" time="0.015"><failure message="Failed: DID NOT RAISE &lt;class 'price.db.DomainError'&gt;">w = World(db=&lt;price.db.Database object at 0x73af658d2710&gt;, svc=&lt;price.service.Service object at 0x73af658d2850&gt;, company='...b873e12558a4fe8', username='other-owner', csrf='', worker=False), evidence='evidence_d55afa977c1f4d2a8082ac30cc6509f8')
+
+    def test_other_analyzer_does_not_allow_source_author_self_approval(w):
+        tx=w.tx()
+        j=w.svc.analyze(w.preparer,w.company,tx['id'])['journal']
+&gt;       with pytest.raises(DomainError) as err:
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE &lt;class 'price.db.DomainError'&gt;
+
+tests/test_ubuntu_hardening.py:19: Failed</failure></testcase><testcase classname="tests.test_ubuntu_hardening" name="test_fact_editor_must_not_approve_worker_generated_journal" time="0.025"><failure message="Failed: DID NOT RAISE &lt;class 'price.db.DomainError'&gt;">w = World(db=&lt;price.db.Database object at 0x73af658a7490&gt;, svc=&lt;price.service.Service object at 0x73af658a75c0&gt;, company='...b873e12558a4fe8', username='other-owner', csrf='', worker=False), evidence='evidence_cfa805af50fa4c72bc7e06ee9499fbe5')
+
+    def test_fact_editor_must_not_approve_worker_generated_journal(w):
+        tx=w.tx(business_purpose='')
+        tx=w.svc.update_facts(w.reviewer,w.company,tx['id'],FactsInput(expected_revision=tx['revision'],business_purpose='검토자가 직접 기입한 거래 사실',tax_category='standard',evidence_ids=[w.evidence],reason='사실 편집'))
+        q=Queue(w.svc);q.enqueue(w.owner,w.company,tx['id']);j=q.run_once(w.company)['result']['journal']
+&gt;       with pytest.raises(DomainError) as err:
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE &lt;class 'price.db.DomainError'&gt;
+
+tests/test_ubuntu_hardening.py:28: Failed</failure></testcase><testcase classname="tests.test_ubuntu_hardening" name="test_independent_reviewer_can_approve_worker_proposal" time="0.028" /></testsuite></testsuites>

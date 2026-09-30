@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="3" skipped="0" tests="4" time="0.458" timestamp="2026-09-28T22:09:20.978937+09:00" hostname="jm-acloud"><testcase classname="tests.test_late_company_facts" name="test_later_ownership_confirmation_invalidates_prior_ready_sources" time="0.402"><failure message="AssertionError: assert 'NORMALIZED' == 'COMPANY_REVIEW'&#10;  &#10;  - COMPANY_REVIEW&#10;  + NORMALIZED">w = World(db=&lt;price.db.Database object at 0x7117035e6c10&gt;, svc=&lt;price.service.Service object at 0x7117035e6d50&gt;, company='...cad83349813b4e5', username='other-owner', csrf='', worker=False), evidence='evidence_fed0eebff522414f8042d49ec45259d9')
+
+    def test_later_ownership_confirmation_invalidates_prior_ready_sources(w):
+        batch=upload(w)
+        reader=Ingestion(w.svc);assert reader.run_once(w.company)['cases']==2
+        owner=OwnerView(w.svc,reader.uploads)
+        owner.confirm(w.owner,w.company,CompanyFactsInput(expected_revision=0,name='시험 회사 A',mode='company',confirmed=True,instruments=[{'kind':'bank','identifier':'999999999999'}]))
+        document=reader.uploads.document(w.owner,w.company,batch['files'][0]['document']['id'])
+&gt;       assert document['state']=='COMPANY_REVIEW'
+E       AssertionError: assert 'NORMALIZED' == 'COMPANY_REVIEW'
+E         
+E         - COMPANY_REVIEW
+E         + NORMALIZED
+
+tests/test_late_company_facts.py:15: AssertionError</failure></testcase><testcase classname="tests.test_late_company_facts" name="test_confirmed_masked_identifier_does_not_falsely_prove_mismatch" time="0.008" /><testcase classname="tests.test_late_company_facts" name="test_conflicting_company_registration_is_held_after_identity_confirmed" time="0.007"><failure message="AssertionError: assert ('SUCCEEDED' == 'BLOCKED'&#10;  &#10;  - BLOCKED&#10;  + SUCCEEDED)">w = World(db=&lt;price.db.Database object at 0x711703488fc0&gt;, svc=&lt;price.service.Service object at 0x7117034890f0&gt;, company='...cad83349813b4e5', username='other-owner', csrf='', worker=False), evidence='evidence_530d217beefd41fd846c0cef8d33914d')
+
+    def test_conflicting_company_registration_is_held_after_identity_confirmed(w):
+        reader=Ingestion(w.svc)
+        OwnerView(w.svc,reader.uploads).confirm(w.owner,w.company,CompanyFactsInput(expected_revision=0,name='시험 회사 A',mode='company',confirmed=True,business_number='9999999999'))
+        upload(w,REGISTRATION.encode(),filename='타회사등록증.txt')
+        result=reader.run_once(w.company)
+&gt;       assert result['state']=='BLOCKED' and result['error']=='COMPANY_SOURCE_CONFLICT'
+E       AssertionError: assert ('SUCCEEDED' == 'BLOCKED'
+E         
+E         - BLOCKED
+E         + SUCCEEDED)
+
+tests/test_late_company_facts.py:35: AssertionError</failure></testcase><testcase classname="tests.test_late_company_facts" name="test_later_invoice_identity_conflict_keeps_original" time="0.007"><failure message="AssertionError: assert 'NORMALIZED' == 'COMPANY_REVIEW'&#10;  &#10;  - COMPANY_REVIEW&#10;  + NORMALIZED">w = World(db=&lt;price.db.Database object at 0x711703489810&gt;, svc=&lt;price.service.Service object at 0x711703489940&gt;, company='...cad83349813b4e5', username='other-owner', csrf='', worker=False), evidence='evidence_a4f553fa945a4f02bb343b6ebde0c4c9')
+
+    def test_later_invoice_identity_conflict_keeps_original(w):
+        batch=upload(w,INVOICES);reader=Ingestion(w.svc);reader.run_once(w.company)
+        OwnerView(w.svc,reader.uploads).confirm(w.owner,w.company,CompanyFactsInput(expected_revision=0,name='시험 회사 A',mode='company',confirmed=True,business_number='9999999999'))
+        document=reader.uploads.document(w.owner,w.company,batch['files'][0]['document']['id'])
+&gt;       assert document['state']=='COMPANY_REVIEW'
+E       AssertionError: assert 'NORMALIZED' == 'COMPANY_REVIEW'
+E         
+E         - COMPANY_REVIEW
+E         + NORMALIZED
+
+tests/test_late_company_facts.py:42: AssertionError</failure></testcase></testsuite></testsuites>

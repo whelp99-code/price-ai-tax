@@ -1,0 +1,54 @@
+{
+  "schema": "price.reconnected-deployment/1",
+  "at": "2026-09-29T05:40:33.314194+00:00",
+  "project": "price",
+  "worker": "price",
+  "source_matches_verified": true,
+  "health": {
+    "ok": true,
+    "project": "price",
+    "worker": "price",
+    "product": "AI 세무사",
+    "version": "0.2.1",
+    "mode": "validation",
+    "live_filing": false
+  },
+  "public_route_checks": {
+    "/api/companies/{company}/owner/card-books": true,
+    "/api/companies/{company}/owner/internal-transfers": true,
+    "/api/companies/{company}/owner/source-availability": true
+  },
+  "cashflow_workbench_served": true,
+  "runtime": {
+    "project": "price",
+    "worker": "price",
+    "root": "/home/jm/orca/projects/price",
+    "api_running": true,
+    "api_health": {
+      "ok": true,
+      "project": "price",
+      "worker": "price",
+      "product": "AI 세무사",
+      "version": "0.2.1",
+      "mode": "validation",
+      "live_filing": false
+    },
+    "worker_running": true,
+    "url": "http://127.0.0.1:4381",
+    "bind": "127.0.0.1",
+    "database": "/home/jm/orca/projects/price/.data/demo.sqlite3",
+    "api_pid": 664877,
+    "worker_pid": 664903,
+    "bookkeeping_worker_enabled": false,
+    "bookkeeping_worker_running": false,
+    "bookkeeping_worker_pid": null,
+    "bookkeeping_scope": "independently_approved_finite_schedules_only",
+    "system_service_installed": false,
+    "orca_worker_registered": false,
+    "demo_only": true
+  },
+  "test_count": 673,
+  "current_database_authenticated_probe_performed": false,
+  "actual_financial_actions_performed": false,
+  "final_v10_accepted": false
+}

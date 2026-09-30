@@ -1,0 +1,119 @@
+{
+  "started_at": "2026-09-29T05:35:41.785463+00:00",
+  "runtime": "Linux-7.0.0-34-generic-x86_64-with-glibc2.43",
+  "project_root": "/home/jm/orca/projects/price",
+  "data": "synthetic only",
+  "real_tax_bank_requests": 0,
+  "checks": [
+    {
+      "name": "HTTP health / independent product",
+      "status": "PASS"
+    },
+    {
+      "name": "unauthenticated records refused",
+      "status": "PASS"
+    },
+    {
+      "name": "owner login",
+      "status": "PASS"
+    },
+    {
+      "name": "original upload hash download",
+      "status": "PASS"
+    },
+    {
+      "name": "repeat import returns same ID",
+      "status": "PASS"
+    },
+    {
+      "name": "self approval rejected on HTTP",
+      "status": "PASS"
+    },
+    {
+      "name": "independent approval then posting",
+      "status": "PASS"
+    },
+    {
+      "name": "unreconciled bank asks facts",
+      "status": "PASS"
+    },
+    {
+      "name": "bank invoice allocation and posting",
+      "status": "PASS"
+    },
+    {
+      "name": "period blocked before coverage",
+      "status": "PASS"
+    },
+    {
+      "name": "period closes after conditions",
+      "status": "PASS"
+    },
+    {
+      "name": "VAT review not official tax",
+      "status": "PASS"
+    },
+    {
+      "name": "live filing refuses",
+      "status": "PASS"
+    },
+    {
+      "name": "timeout remains unknown",
+      "status": "PASS"
+    },
+    {
+      "name": "unknown cannot resubmit",
+      "status": "PASS"
+    },
+    {
+      "name": "receipt explicitly simulated",
+      "status": "PASS"
+    },
+    {
+      "name": "payment bank unverified",
+      "status": "PASS"
+    },
+    {
+      "name": "model configuration honest",
+      "status": "PASS"
+    },
+    {
+      "name": "durable worker no duplicate posting",
+      "status": "PASS"
+    },
+    {
+      "name": "auditable export not official",
+      "status": "PASS"
+    },
+    {
+      "name": "debit credit exact match",
+      "status": "PASS"
+    }
+  ],
+  "server_url_at_test_time": "http://127.0.0.1:41245",
+  "health": {
+    "ok": true,
+    "project": "price",
+    "worker": "price",
+    "product": "AI 세무사",
+    "version": "0.2.1",
+    "mode": "validation",
+    "live_filing": false
+  },
+  "final_counts": {
+    "transactions": 3,
+    "evidence": 1,
+    "posted": 3,
+    "pending_journals": 0,
+    "open_cases": 0
+  },
+  "audit": {
+    "valid": true,
+    "events": 35,
+    "head": "d63c64c63d1d9f419ee0ac7de920b9c1a6d200387bbb9f758d9e63e34ff537c2",
+    "external_anchor": false
+  },
+  "status": "PASS",
+  "server_stopped": true,
+  "finished_at": "2026-09-29T05:35:43.348911+00:00"
+}

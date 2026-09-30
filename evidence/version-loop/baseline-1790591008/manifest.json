@@ -1,0 +1,56 @@
+{
+  "files": {
+    "docs/DEVELOPMENT_PLAN_KO.md": "1f27efb96389c781e41f9706f3481dc5a567c2a58eb7f09db5094f96befc5efe",
+    "docs/IMPLEMENTATION_STATUS_KO.md": "ed3383b083449edbd693c133d3725ec91a7248daec910b723468c420d7eb200b",
+    "docs/IMPLEMENT_NOW.md": "703ed858e4c4d4817f8720c3490145b27633adc3d55dafa00f370a3e97193aac",
+    "docs/OWNER_UPLOAD_FIRST_REQUIREMENTS_KO.md": "939c98bda40732a6f75abfcdf5d722bb4fa4ddf6b9be4d692eac130b09817796",
+    "docs/openapi.json": "a4944d973bc3314e0b8058568008a644ed420194cfdc64ce10b51bc4350c969e",
+    "price/__init__.py": "6d20f3e00d6d2117f9d27662b1670505598c637320215a9dacd936e307095dac",
+    "price/__main__.py": "cf7390a2508a0fcad4777a4a629fc5212ab655cb45845975995f835676a834e3",
+    "price/ai.py": "0a12a70201bdf2ca8509df32afca90c01998c81dc6e01570223bbd7d6a3648e5",
+    "price/api.py": "d74ae672b1080311d888f102e2ae20219b524021663e6df0071420dcb98174b5",
+    "price/auth.py": "e90e89af321c31a2773f63e025d0626d1869521cde113dd19e3b56cda39168a2",
+    "price/calculations.py": "147aeee06251617f13523ae7cd0d646a336349296dfe974bb92bd4ff8051fde9",
+    "price/cli.py": "7943ba77863d167a14427ad993a9b42c03580a250df39e933971c23fa7a0c8c5",
+    "price/db.py": "48990f935f276983ce3bf020135dd8260ee34419041f4793ae7debd3a5f4a230",
+    "price/demo.py": "3951af957ee5704ef1d669d7cef28681aab17c0c1d3e31596ee11ced30b11fcd",
+    "price/evidence.py": "12db5c78ba78afa55f4e6d7dbf2c746c1943492d6a3ed11e1c4dfb4967c667fc",
+    "price/filing.py": "ba2e61ecdb782621114c17e969aa8862e2ffd86974c5d9e572462aa123040fcc",
+    "price/models.py": "66533b0cddde493e6f6bffca0d5733a408804e60396115992e3dd0ea6ef384bb",
+    "price/schema.sql": "97c0287d8d86a474bc8089cd0499b86c4dcc49bbce156a724bf8b2da6695c22a",
+    "price/service.py": "a7bf3bdc6b3f5692ab8dc3140799d74d8d9047df937e5b64579e9e7455b33289",
+    "price/static/app.css": "54e23ee0605ecbed1adda835c106372520dc0e2d0fec26313647cda96ef90a2f",
+    "price/static/app.js": "195bb9629f9712ee50c50c6af1dfaf86096d0ed6aeb6491776bfb52eddad4554",
+    "price/static/index.html": "e7e1c9300dc4f83633620ce1670d58aba2124e9597bf85ba156e4f3a69c6ed29",
+    "price/worker.py": "0919253785044dbcc6adfe68d811e3532bad5352fedeb6f8262256dfa258cb0c",
+    "scripts/e2e_browser.mjs": "2ab52445c2bb3be6449f342269c1b223a8874b92284f219a06bf0874a8cb0af7",
+    "scripts/e2e_http.py": "238f5e3ec8844006b457d159b49fe3aed335d7483513b423c3a2468e447d4c88",
+    "scripts/install_standalone.py": "e38ee7ab606e84a52374c20a75cb406d3c6b1663d81e84a4e2072427fbd7271a",
+    "scripts/runtime.py": "3e9cf7ef2409dba0b632d982ce7443f20fce174c023a0105152084c0412f4181",
+    "tests/conftest.py": "652dada899abab2a3a7a7f50c64038e530629719af000bef722fa63e4793bdab",
+    "tests/test_api_ai_ops.py": "e10f16414fc41618832bb9a839aa6260af884ff36bca164517ede0381a1abc44",
+    "tests/test_domain.py": "5d3fd7a12a24e2205bb7079f693b2a8b7c5840d146112216586a77d9affd6125",
+    "tests/test_packaging_runtime.py": "fb144387c4bf88798ce767ef3220dbbcefaa50d0f53ba8f8a8615d49b3717e1c",
+    "tests/test_ubuntu_hardening.py": "a74f3b7e5e9fdf3f5d619684dab2bff447b2e21a1a1c72c8e0ec8c10348310f7",
+    "tests/test_workflows.py": "93dbc23837b1d2cb23d7005f3235f674626376bfa031980b1e14e97a1589669b",
+    "AGENTS.md": "4ae74a7bb7ca7afec6de878ca1f7f513133beed3bb1fdccd45bd199afe504b7a",
+    "pyproject.toml": "a19eb10438f3012aae5afb4123ec27f3915c0944d63bd39dae65f2b67f402ad9",
+    "requirements.txt": "84cade098910736962888ea237dfc125b773b5fd09796ecdbbe6828fd154acb1",
+    "requirements-test.txt": "3c3ad6730cf0c0417b77bae38e53c11fa8cd96a34f2f8956998bafc0aaf3ef17",
+    "worker.json": "7dbb779e9fa981640e596a582675a521569551587be7404e94e9fa59931cdadf",
+    ".gitignore": "83a9043950efc5f66bf9528725b8e896ea7e04074b1f8527d1f5927c36db7ab8"
+  },
+  "databases": [
+    {
+      "name": "openapi.sqlite3",
+      "backup": ".data/version-loop-backups/1790591008-openapi.sqlite3",
+      "integrity": "ok"
+    },
+    {
+      "name": "demo.sqlite3",
+      "backup": ".data/version-loop-backups/1790591008-demo.sqlite3",
+      "integrity": "ok"
+    }
+  ],
+  "source_only_archive": true
+}

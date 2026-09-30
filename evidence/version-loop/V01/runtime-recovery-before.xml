@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="2" skipped="0" tests="3" time="0.034" timestamp="2026-09-28T22:14:58.628241+09:00" hostname="jm-acloud"><testcase classname="tests.test_runtime_recovery" name="test_start_repairs_missing_worker_without_replacing_api" time="0.007"><failure message="assert (True and False)">monkeypatch = &lt;_pytest.monkeypatch.MonkeyPatch object at 0x7430b667aea0&gt;
+tmp_path = PosixPath('/tmp/pytest-of-jm/pytest-279/test_start_repairs_missing_wor0')
+
+    def test_start_repairs_missing_worker_without_replacing_api(monkeypatch,tmp_path):
+        module,calls=configured(monkeypatch,tmp_path,True,False)
+        state=module.start()
+&gt;       assert state['api_running'] and state['worker_running']
+E       assert (True and False)
+
+tests/test_runtime_recovery.py:48: AssertionError</failure></testcase><testcase classname="tests.test_runtime_recovery" name="test_start_repairs_missing_api_without_replacing_worker" time="0.001"><failure message="assert (False)">monkeypatch = &lt;_pytest.monkeypatch.MonkeyPatch object at 0x7430b667b490&gt;
+tmp_path = PosixPath('/tmp/pytest-of-jm/pytest-279/test_start_repairs_missing_api0')
+
+    def test_start_repairs_missing_api_without_replacing_worker(monkeypatch,tmp_path):
+        module,calls=configured(monkeypatch,tmp_path,False,True)
+        state=module.start()
+&gt;       assert state['api_running'] and state['worker_running']
+E       assert (False)
+
+tests/test_runtime_recovery.py:56: AssertionError</failure></testcase><testcase classname="tests.test_runtime_recovery" name="test_start_is_idempotent_when_both_owned_components_alive" time="0.001" /></testsuite></testsuites>

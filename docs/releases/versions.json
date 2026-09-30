@@ -1,0 +1,193 @@
+{
+  "schema": "price.version-loop-state/1",
+  "project": "price",
+  "worker": "price",
+  "goal": "owner upload-only AI tax accountant",
+  "baseline_version": "0.2.1",
+  "release_version_changed": false,
+  "final_version": "1.0.0",
+  "final_accepted": false,
+  "active_version": "V01",
+  "loop_steps": [
+    "DEVELOP",
+    "VERIFY",
+    "FIX",
+    "REVERIFY",
+    "ACCEPT"
+  ],
+  "advance_only_after_acceptance": true,
+  "current_evidence": {
+    "unit_integration_regression": "evidence/version-loop/snapshots/20260929T053523264190Z/regression.xml",
+    "verification_snapshot": "evidence/version-loop/snapshots/20260929T053523264190Z/verification.json",
+    "passed": 673,
+    "failed": 0,
+    "errors": 0,
+    "skipped": 0,
+    "source_stable_during_verification": true,
+    "real_institution_format_accepted": false,
+    "real_tax_filing_executed": false,
+    "http_checks": 21,
+    "owner_original_files_checks": 17,
+    "owner_business_facts_checks": 14,
+    "expert_browser_checks": 22,
+    "owner_browser_checks": 23,
+    "cashflow_browser_checks": 13,
+    "bookkeeping_browser_checks": 19,
+    "cashflow_browser": "evidence/version-loop/cashflow-browser/report.json",
+    "updated_at": "2026-09-29T05:36:22.965523+00:00"
+  },
+  "versions": [
+    {
+      "id": "V01",
+      "target": "0.3.0",
+      "title": "대표 자료함과 자동처리 입구",
+      "state": "VERIFIED_SYNTHETIC_PENDING_ACCEPTANCE",
+      "reasons": [
+        "institution-provided original-format bundle and independent acceptance not yet available"
+      ],
+      "details": "docs/releases/READER_REPLAY_LOOP_RESULT.md",
+      "engineering_details": "docs/releases/ENGINEERING_COMPONENTS_20260928.md"
+    },
+    {
+      "id": "V02",
+      "target": "0.4.0",
+      "title": "원본 파일 자동 읽기 완성",
+      "state": "WAITING_FOR_PREDECESSOR"
+    },
+    {
+      "id": "V03",
+      "target": "0.5.0",
+      "title": "교차 거래 연결과 중복 방지",
+      "engineering_status": "STRONG_SOURCE_MATCHED_INTERNAL_TRANSFERS_AND_CARD_CHARGE_CANCEL_BILL_REFUND_VERIFIED_SYNTHETIC",
+      "state": "WAITING_FOR_PREDECESSOR"
+    },
+    {
+      "id": "V04",
+      "target": "0.6.0",
+      "title": "업무 사실 질문과 회사 기억",
+      "engineering_status": "FACTS_AND_REVIEW_WORKFLOW_VERIFIED_SYNTHETIC_LIVE_MODEL_UNAVAILABLE",
+      "state": "WAITING_FOR_PREDECESSOR"
+    },
+    {
+      "id": "V05",
+      "target": "0.7.0",
+      "title": "검증 정책 기반 자동기장",
+      "engineering_status": "POLICY_EXECUTOR_VERIFIED_IN_ISOLATION_PRODUCTION_DISABLED",
+      "state": "WAITING_FOR_PREDECESSOR",
+      "engineering_details": "Actual reviewed invoice/card/bank settlement postings and bounded policy execution are implemented; full automated financial/tax scope remains incomplete."
+    },
+    {
+      "id": "V06",
+      "target": "0.8.0",
+      "title": "월마감과 재무 보고",
+      "engineering_status": "SOURCE_COVERAGE_AND_SCHEDULE_COMPONENTS_VERIFIED_SYNTHETIC",
+      "state": "WAITING_FOR_PREDECESSOR",
+      "engineering_details": "Source-availability reports, no-activity declarations, opening/books/inventory components verified; source-completeness attestation storage and real month/year acceptance remain pending."
+    },
+    {
+      "id": "V07",
+      "target": "0.9.0",
+      "title": "부가세와 법정 신고안",
+      "engineering_status": "FULL_STATUTORY_RULES_AND_FORMS_NOT_IMPLEMENTED",
+      "state": "WAITING_FOR_PREDECESSOR"
+    },
+    {
+      "id": "V08",
+      "target": "0.10.0",
+      "title": "급여 원천 법인 지방세 연간 업무",
+      "engineering_status": "RATE_AND_RECONCILIATION_COMPONENTS_ONLY_FULL_TAX_SCOPE_INCOMPLETE",
+      "state": "WAITING_FOR_PREDECESSOR"
+    },
+    {
+      "id": "V09",
+      "target": "0.11.0",
+      "title": "실수집 발행 신고 접수 납부확인",
+      "engineering_status": "SUBMISSION_BOUNDARY_VERIFIED_WITH_TEST_ADAPTERS_NO_LIVE_CHANNEL",
+      "state": "WAITING_FOR_PREDECESSOR"
+    },
+    {
+      "id": "V10",
+      "target": "1.0.0",
+      "title": "전 기능 실업무 운영 인수",
+      "engineering_status": "EVIDENCE_AND_HEARTBEAT_COMPONENTS_IMPLEMENTED_ACCEPTANCE_PENDING",
+      "state": "WAITING_FOR_PREDECESSOR"
+    }
+  ],
+  "background_development_process_running": false,
+  "commit_or_push_performed": false,
+  "public_service_installed": false,
+  "history": [
+    {
+      "superseded_at": "2026-09-28T14:09:58.370266+00:00",
+      "current_evidence": {
+        "unit_integration_regression": "evidence/version-loop/V01/final-check.xml",
+        "passed": 315,
+        "failed": 2,
+        "skipped": 0,
+        "owner_browser": "evidence/version-loop/V01/owner-extended-browser-report.json",
+        "owner_browser_checks": 17,
+        "expert_browser": "evidence/ubuntu/browser-report.json",
+        "expert_browser_checks": 22,
+        "http": "evidence/ubuntu/http-e2e-report.json",
+        "http_checks": 21,
+        "real_institution_format_accepted": false,
+        "real_tax_filing_executed": false
+      },
+      "old_active_version": "V01"
+    },
+    {
+      "superseded_at": "2026-09-29T05:36:22.965523+00:00",
+      "current_evidence": {
+        "unit_integration_regression": "evidence/version-loop/snapshots/20260928T143248393334Z/regression.xml",
+        "passed": 501,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0,
+        "owner_browser": "evidence/version-loop/reader-replay/reader-replay-browser-report.json",
+        "owner_browser_checks": 23,
+        "real_institution_format_accepted": false,
+        "real_tax_filing_executed": false,
+        "verification_snapshot": "evidence/version-loop/snapshots/20260928T143248393334Z/verification.json",
+        "source_stable_during_verification": true,
+        "owner_business_facts_browser": "evidence/version-loop/business-facts/report.json",
+        "owner_business_facts_checks": 14,
+        "owner_original_files_checks": 17,
+        "expert_browser_checks": 22,
+        "http_checks": 21,
+        "updated_at": "2026-09-28T14:33:24.403985+00:00"
+      },
+      "old_active_version": "V01"
+    }
+  ],
+  "resolved_blockers": [
+    {
+      "reason": "partial API/worker recovery regression",
+      "evidence": "evidence/version-loop/recovery-integrated.xml",
+      "status": "FIXED_AND_REVERIFIED"
+    },
+    {
+      "reason": "initial source-writing attempt prevented development",
+      "status": "SUPERSEDED_BY_SUCCESSFUL_SOURCE_WRITES_AND_REGRESSION"
+    }
+  ],
+  "external_operations": [
+    {
+      "operation": "install optional hash-pinned legacy XLS reader in project virtual environment",
+      "status": "NOT_EXECUTED_OWNER_APPROVAL_REQUIRED",
+      "last_approval_id": "b044122c-189b-4019-96fb-17bec3243968",
+      "authorization_inferred": false,
+      "dependency_file": "requirements-readers.lock",
+      "runtime_venv_exists": false
+    }
+  ],
+  "implementation_note": "Reader, event, review, policy, workpaper and channel-boundary code is present and tested locally. This does not accept later versions or replace real statutory rules, external credentials, professional truth or live business evidence.",
+  "reconnected_implementation": {
+    "project": "price",
+    "worker": "price",
+    "read_write_verified": true,
+    "details": "docs/releases/RECONNECTED_CASHFLOW_20260929.md",
+    "full_coverage_attestation_service_created": false,
+    "coverage_view_kind": "read_only_source_availability",
+    "external_codex_delegation_executed": false
+  }
+}

@@ -1,0 +1,118 @@
+{
+  "started_at": "2026-09-29T05:36:03.724Z",
+  "data": "synthetic source-format fixtures, not institution-verified originals",
+  "checks": [
+    {
+      "name": "owner has exactly three normal workflow tabs",
+      "status": "PASS"
+    },
+    {
+      "name": "normal workflow contains no journal-entry or reviewer-switch form",
+      "status": "PASS"
+    },
+    {
+      "name": "multiple source files are stored through the real picker",
+      "status": "PASS"
+    },
+    {
+      "name": "without worker sources stay queued, never called accounting complete",
+      "status": "PASS"
+    },
+    {
+      "name": "invalid file visibly remains unresolved",
+      "status": "PASS"
+    },
+    {
+      "name": "restart resumes all three durable source jobs without manual input",
+      "status": "PASS"
+    },
+    {
+      "name": "reordered identical upload reuses documents and cases",
+      "status": "PASS"
+    },
+    {
+      "name": "source ingestion does not fabricate accounting completion",
+      "status": "PASS"
+    },
+    {
+      "name": "untrusted source text is inert in actual browser",
+      "status": "PASS"
+    },
+    {
+      "name": "Korean PDF text-layer populates company facts without manual entry",
+      "status": "PASS"
+    },
+    {
+      "name": "owner confirms facts without accounting selection or account switching",
+      "status": "PASS"
+    },
+    {
+      "name": "reading result and financial result remain distinguished",
+      "status": "PASS"
+    },
+    {
+      "name": "390px owner view no horizontal overflow: upload",
+      "status": "PASS"
+    },
+    {
+      "name": "390px owner view no horizontal overflow: questions",
+      "status": "PASS"
+    },
+    {
+      "name": "390px owner view no horizontal overflow: results",
+      "status": "PASS"
+    },
+    {
+      "name": "XML HTML-XLS and generated PDF tables enter the real worker",
+      "status": "PASS"
+    },
+    {
+      "name": "native PDF table amounts and page provenance verified",
+      "status": "PASS"
+    },
+    {
+      "name": "wrong company facts hold previously read documents",
+      "status": "PASS"
+    },
+    {
+      "name": "actual owner retry stores two immutable extraction generations",
+      "status": "PASS"
+    },
+    {
+      "name": "unchanged source replay records no fabricated value changes",
+      "status": "PASS"
+    },
+    {
+      "name": "owner sees replay history without accounting input",
+      "status": "PASS"
+    },
+    {
+      "name": "no uncaught JavaScript errors",
+      "status": "PASS"
+    },
+    {
+      "name": "owner stayed in same account",
+      "status": "PASS"
+    }
+  ],
+  "screenshots": [
+    "evidence/version-loop/reader-replay/synthetic-pdf-table-source.png",
+    "evidence/version-loop/reader-replay/owner-empty-desktop.png",
+    "evidence/version-loop/reader-replay/owner-upload-desktop.png",
+    "evidence/version-loop/reader-replay/owner-results-desktop.png",
+    "evidence/version-loop/reader-replay/owner-mobile.png",
+    "evidence/version-loop/reader-replay/reader-history-desktop.png"
+  ],
+  "real_filing": false,
+  "policy_modified": false,
+  "sandbox_disabled": false,
+  "javascript_exceptions": [],
+  "status": "PASS",
+  "limitations": [
+    "Only synthetic generic source-format files",
+    "No real institution-format acceptance",
+    "No automatic bookkeeping/tax filing claimed"
+  ],
+  "own_processes_stopped": true,
+  "finished_at": "2026-09-29T05:36:11.175Z"
+}

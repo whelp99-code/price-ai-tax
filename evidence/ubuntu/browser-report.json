@@ -1,0 +1,107 @@
+{
+  "started_at": "2026-09-29T05:35:57.145Z",
+  "runtime": "Ubuntu Chrome native CDP",
+  "root": "/home/jm/orca/projects/price",
+  "data": "synthetic only",
+  "checks": [
+    {
+      "name": "browser login and persisted overview",
+      "status": "PASS"
+    },
+    {
+      "name": "desktop route evidence",
+      "status": "PASS"
+    },
+    {
+      "name": "desktop route transactions",
+      "status": "PASS"
+    },
+    {
+      "name": "desktop route cases",
+      "status": "PASS"
+    },
+    {
+      "name": "desktop route journals",
+      "status": "PASS"
+    },
+    {
+      "name": "desktop route closing",
+      "status": "PASS"
+    },
+    {
+      "name": "desktop route tax",
+      "status": "PASS"
+    },
+    {
+      "name": "desktop route advice",
+      "status": "PASS"
+    },
+    {
+      "name": "desktop route ops",
+      "status": "PASS"
+    },
+    {
+      "name": "transaction form writes actual API state",
+      "status": "PASS"
+    },
+    {
+      "name": "untrusted HTML rendered inert",
+      "status": "PASS"
+    },
+    {
+      "name": "browser self approval blocked",
+      "status": "PASS"
+    },
+    {
+      "name": "independent reviewer approval via UI",
+      "status": "PASS"
+    },
+    {
+      "name": "approved journal posted via UI",
+      "status": "PASS"
+    },
+    {
+      "name": "390px no page overflow home",
+      "status": "PASS"
+    },
+    {
+      "name": "390px no page overflow transactions",
+      "status": "PASS"
+    },
+    {
+      "name": "390px no page overflow journals",
+      "status": "PASS"
+    },
+    {
+      "name": "390px no page overflow closing",
+      "status": "PASS"
+    },
+    {
+      "name": "390px no page overflow tax",
+      "status": "PASS"
+    },
+    {
+      "name": "390px no page overflow advice",
+      "status": "PASS"
+    },
+    {
+      "name": "390px no page overflow ops",
+      "status": "PASS"
+    },
+    {
+      "name": "no uncaught JavaScript errors",
+      "status": "PASS"
+    }
+  ],
+  "screenshots": [
+    "evidence/ubuntu/browser-home-desktop.png",
+    "evidence/ubuntu/browser-ledger-desktop.png",
+    "evidence/ubuntu/browser-mobile.png"
+  ],
+  "policy_modified": false,
+  "sandbox_disabled": false,
+  "runtime_exceptions": [],
+  "status": "PASS",
+  "own_processes_stopped": true,
+  "finished_at": "2026-09-29T05:36:03.684Z"
+}

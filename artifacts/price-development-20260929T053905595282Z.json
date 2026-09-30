@@ -1,0 +1,26 @@
+{
+  "schema": "price.development-package/1",
+  "source_archive": "artifacts/price-development-20260929T053905595282Z.zip",
+  "sha256": "f6dec4ca42cd6b2a8cd946d1d55cf7eda2b966dc875b68701bcf1c2c2a29ad59",
+  "bytes": 458775,
+  "source_files": 176,
+  "member_hashes_verified": true,
+  "isolated_source_smoke": {
+    "source_import": true,
+    "schema": true,
+    "static_assets": true,
+    "authenticated_api": true,
+    "final_release_claimed": false
+  },
+  "verification": "evidence/version-loop/snapshots/20260929T053523264190Z/verification.json",
+  "regression": {
+    "tests": 673,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "source_stable": true,
+  "final_version_accepted": false,
+  "runtime_db_credentials_and_originals_included": false,
+  "pip_install_performed": false
+}

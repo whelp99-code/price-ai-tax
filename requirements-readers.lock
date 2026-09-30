@@ -1,0 +1,4 @@
+# Optional isolated reader dependency. Source: PyPI xlrd release metadata checked 2026-09-28.
+# https://pypi.org/project/xlrd/2.0.2/
+# No executable document content, formulas, or external references are evaluated.
+xlrd==2.0.2 --hash=sha256:ea762c3d29f4cca48d82df517b6d89fbce4db3107f9d78713e48cd321d5c9aa9

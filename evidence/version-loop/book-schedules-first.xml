@@ -1,0 +1,295 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="12" skipped="0" tests="23" time="0.599" timestamp="2026-09-29T07:40:55.269743+09:00" hostname="jm-acloud"><testcase classname="tests.test_book_schedules" name="test_real_prepaid_postings_conserve_expense_and_original_vat" time="0.413"><failure message="TypeError: 'NoneType' object is not subscriptable">w = World(db=&lt;price.db.Database object at 0x79614efcb9d0&gt;, svc=&lt;price.service.Service object at 0x79614efcbb10&gt;, company='...cd8350e53a51a3a', username='other-owner', csrf='', worker=False), evidence='evidence_9c979e3005cf461ba616b8ad164c41c2')
+
+    def test_real_prepaid_postings_conserve_expense_and_original_vat(w):
+&gt;       service,plan,original=approved(w)
+                              ^^^^^^^^^^^
+
+tests/test_book_schedules.py:29: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_book_schedules.py:23: in approved
+    service,plan,journal=make_plan(w,kind,**changes)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_book_schedules.py:13: in make_plan
+    journal=w.post(tx)
+            ^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = World(db=&lt;price.db.Database object at 0x79614efcb9d0&gt;, svc=&lt;price.service.Service object at 0x79614efcbb10&gt;, company='...cd8350e53a51a3a', username='other-owner', csrf='', worker=False), evidence='evidence_9c979e3005cf461ba616b8ad164c41c2')
+tx = {'author': 'user_4bd030136c404b22a9fd9993a8a4140d', 'business_purpose': '검증용 용역', 'contract': '', 'counterparty': '테스트 고객', ...}
+
+    def post(self, tx):
+        j = self.analyze(tx)['journal']
+&gt;       j = self.svc.transition_journal(self.reviewer, self.company, j['id'], 'approve', j['revision'], '독립 검토')
+                                                                     ^^^^^^^
+E       TypeError: 'NoneType' object is not subscriptable
+
+tests/conftest.py:36: TypeError</failure></testcase><testcase classname="tests.test_book_schedules" name="test_asset_reclassification_depreciation_and_subledger" time="0.003"><failure message="TypeError: 'NoneType' object is not subscriptable">w = World(db=&lt;price.db.Database object at 0x79614eeb8a50&gt;, svc=&lt;price.service.Service object at 0x79614eeb8b90&gt;, company='...cd8350e53a51a3a', username='other-owner', csrf='', worker=False), evidence='evidence_2b228ab317f34d65bb8620698c0b3f25')
+
+    def test_asset_reclassification_depreciation_and_subledger(w):
+&gt;       service,plan,original=approved(w,'asset')
+                              ^^^^^^^^^^^^^^^^^^^
+
+tests/test_book_schedules.py:50: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_book_schedules.py:23: in approved
+    service,plan,journal=make_plan(w,kind,**changes)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_book_schedules.py:13: in make_plan
+    journal=w.post(tx)
+            ^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = World(db=&lt;price.db.Database object at 0x79614eeb8a50&gt;, svc=&lt;price.service.Service object at 0x79614eeb8b90&gt;, company='...cd8350e53a51a3a', username='other-owner', csrf='', worker=False), evidence='evidence_2b228ab317f34d65bb8620698c0b3f25')
+tx = {'author': 'user_4bd030136c404b22a9fd9993a8a4140d', 'business_purpose': '검증용 용역', 'contract': '', 'counterparty': '테스트 고객', ...}
+
+    def post(self, tx):
+        j = self.analyze(tx)['journal']
+&gt;       j = self.svc.transition_journal(self.reviewer, self.company, j['id'], 'approve', j['revision'], '독립 검토')
+                                                                     ^^^^^^^
+E       TypeError: 'NoneType' object is not subscriptable
+
+tests/conftest.py:36: TypeError</failure></testcase><testcase classname="tests.test_book_schedules" name="test_no_self_approval_no_unapproved_execution" time="0.003"><failure message="TypeError: 'NoneType' object is not subscriptable">w = World(db=&lt;price.db.Database object at 0x79614ef25cd0&gt;, svc=&lt;price.service.Service object at 0x79614ef25e00&gt;, company='...cd8350e53a51a3a', username='other-owner', csrf='', worker=False), evidence='evidence_c7c2282340ea45d5a82299eb1957467b')
+
+    def test_no_self_approval_no_unapproved_execution(w):
+&gt;       service,plan,_=make_plan(w)
+                       ^^^^^^^^^^^^
+
+tests/test_book_schedules.py:66: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_book_schedules.py:13: in make_plan
+    journal=w.post(tx)
+            ^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = World(db=&lt;price.db.Database object at 0x79614ef25cd0&gt;, svc=&lt;price.service.Service object at 0x79614ef25e00&gt;, company='...cd8350e53a51a3a', username='other-owner', csrf='', worker=False), evidence='evidence_c7c2282340ea45d5a82299eb1957467b')
+tx = {'author': 'user_4bd030136c404b22a9fd9993a8a4140d', 'business_purpose': '검증용 용역', 'contract': '', 'counterparty': '테스트 고객', ...}
+
+    def post(self, tx):
+        j = self.analyze(tx)['journal']
+&gt;       j = self.svc.transition_journal(self.reviewer, self.company, j['id'], 'approve', j['revision'], '독립 검토')
+                                                                     ^^^^^^^
+E       TypeError: 'NoneType' object is not subscriptable
+
+tests/conftest.py:36: TypeError</failure></testcase><testcase classname="tests.test_book_schedules" name="test_plan_is_idempotent_and_same_source_cannot_be_consumed_twice" time="0.003"><failure message="TypeError: 'NoneType' object is not subscriptable">w = World(db=&lt;price.db.Database object at 0x79614ef263f0&gt;, svc=&lt;price.service.Service object at 0x79614ef26520&gt;, company='...cd8350e53a51a3a', username='other-owner', csrf='', worker=False), evidence='evidence_beeab3f0216545ce903f94182f6598cf')
+
+    def test_plan_is_idempotent_and_same_source_cannot_be_consumed_twice(w):
+&gt;       service,plan,original=make_plan(w)
+                              ^^^^^^^^^^^^
+
+tests/test_book_schedules.py:73: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_book_schedules.py:13: in make_plan
+    journal=w.post(tx)
+            ^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = World(db=&lt;price.db.Database object at 0x79614ef263f0&gt;, svc=&lt;price.service.Service object at 0x79614ef26520&gt;, company='...cd8350e53a51a3a', username='other-owner', csrf='', worker=False), evidence='evidence_beeab3f0216545ce903f94182f6598cf')
+tx = {'author': 'user_4bd030136c404b22a9fd9993a8a4140d', 'business_purpose': '검증용 용역', 'contract': '', 'counterparty': '테스트 고객', ...}
+
+    def post(self, tx):
+        j = self.analyze(tx)['journal']
+&gt;       j = self.svc.transition_journal(self.reviewer, self.company, j['id'], 'approve', j['revision'], '독립 검토')
+                                                                     ^^^^^^^
+E       TypeError: 'NoneType' object is not subscriptable
+
+tests/conftest.py:36: TypeError</failure></testcase><testcase classname="tests.test_book_schedules" name="test_changed_approved_schedule_is_rejected" time="0.003"><failure message="TypeError: 'NoneType' object is not subscriptable">w = World(db=&lt;price.db.Database object at 0x79614ed91a30&gt;, svc=&lt;price.service.Service object at 0x79614ed91b50&gt;, company='...cd8350e53a51a3a', username='other-owner', csrf='', worker=False), evidence='evidence_1ecd16869a114c3c84eb96949d8513d6')
+
+    def test_changed_approved_schedule_is_rejected(w):
+&gt;       service,plan,_=approved(w)
+                       ^^^^^^^^^^^
+
+tests/test_book_schedules.py:81: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_book_schedules.py:23: in approved
+    service,plan,journal=make_plan(w,kind,**changes)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_book_schedules.py:13: in make_plan
+    journal=w.post(tx)
+            ^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = World(db=&lt;price.db.Database object at 0x79614ed91a30&gt;, svc=&lt;price.service.Service object at 0x79614ed91b50&gt;, company='...cd8350e53a51a3a', username='other-owner', csrf='', worker=False), evidence='evidence_1ecd16869a114c3c84eb96949d8513d6')
+tx = {'author': 'user_4bd030136c404b22a9fd9993a8a4140d', 'business_purpose': '검증용 용역', 'contract': '', 'counterparty': '테스트 고객', ...}
+
+    def post(self, tx):
+        j = self.analyze(tx)['journal']
+&gt;       j = self.svc.transition_journal(self.reviewer, self.company, j['id'], 'approve', j['revision'], '독립 검토')
+                                                                     ^^^^^^^
+E       TypeError: 'NoneType' object is not subscriptable
+
+tests/conftest.py:36: TypeError</failure></testcase><testcase classname="tests.test_book_schedules" name="test_reviewer_revocation_immediately_stops_later_postings" time="0.003"><failure message="TypeError: 'NoneType' object is not subscriptable">w = World(db=&lt;price.db.Database object at 0x79614eed29c0&gt;, svc=&lt;price.service.Service object at 0x79614eed2ad0&gt;, company='...cd8350e53a51a3a', username='other-owner', csrf='', worker=False), evidence='evidence_fd3c9a1005624c0b98a27a04dd397c9f')
+
+    def test_reviewer_revocation_immediately_stops_later_postings(w):
+&gt;       service,plan,_=approved(w)
+                       ^^^^^^^^^^^
+
+tests/test_book_schedules.py:90: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_book_schedules.py:23: in approved
+    service,plan,journal=make_plan(w,kind,**changes)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_book_schedules.py:13: in make_plan
+    journal=w.post(tx)
+            ^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = World(db=&lt;price.db.Database object at 0x79614eed29c0&gt;, svc=&lt;price.service.Service object at 0x79614eed2ad0&gt;, company='...cd8350e53a51a3a', username='other-owner', csrf='', worker=False), evidence='evidence_fd3c9a1005624c0b98a27a04dd397c9f')
+tx = {'author': 'user_4bd030136c404b22a9fd9993a8a4140d', 'business_purpose': '검증용 용역', 'contract': '', 'counterparty': '테스트 고객', ...}
+
+    def post(self, tx):
+        j = self.analyze(tx)['journal']
+&gt;       j = self.svc.transition_journal(self.reviewer, self.company, j['id'], 'approve', j['revision'], '독립 검토')
+                                                                     ^^^^^^^
+E       TypeError: 'NoneType' object is not subscriptable
+
+tests/conftest.py:36: TypeError</failure></testcase><testcase classname="tests.test_book_schedules" name="test_period_lock_rolls_back_whole_due_batch" time="0.003"><failure message="TypeError: 'NoneType' object is not subscriptable">w = World(db=&lt;price.db.Database object at 0x79614eed2f10&gt;, svc=&lt;price.service.Service object at 0x79614eed3020&gt;, company='...cd8350e53a51a3a', username='other-owner', csrf='', worker=False), evidence='evidence_6d141c3579514b7d9da7c3baad775b14')
+
+    def test_period_lock_rolls_back_whole_due_batch(w):
+&gt;       service,plan,_=approved(w)
+                       ^^^^^^^^^^^
+
+tests/test_book_schedules.py:98: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_book_schedules.py:23: in approved
+    service,plan,journal=make_plan(w,kind,**changes)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_book_schedules.py:13: in make_plan
+    journal=w.post(tx)
+            ^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = World(db=&lt;price.db.Database object at 0x79614eed2f10&gt;, svc=&lt;price.service.Service object at 0x79614eed3020&gt;, company='...cd8350e53a51a3a', username='other-owner', csrf='', worker=False), evidence='evidence_6d141c3579514b7d9da7c3baad775b14')
+tx = {'author': 'user_4bd030136c404b22a9fd9993a8a4140d', 'business_purpose': '검증용 용역', 'contract': '', 'counterparty': '테스트 고객', ...}
+
+    def post(self, tx):
+        j = self.analyze(tx)['journal']
+&gt;       j = self.svc.transition_journal(self.reviewer, self.company, j['id'], 'approve', j['revision'], '독립 검토')
+                                                                     ^^^^^^^
+E       TypeError: 'NoneType' object is not subscriptable
+
+tests/conftest.py:36: TypeError</failure></testcase><testcase classname="tests.test_book_schedules" name="test_concurrent_due_execution_has_one_ledger_effect" time="0.003"><failure message="TypeError: 'NoneType' object is not subscriptable">w = World(db=&lt;price.db.Database object at 0x79614eda8050&gt;, svc=&lt;price.service.Service object at 0x79614eda8150&gt;, company='...cd8350e53a51a3a', username='other-owner', csrf='', worker=False), evidence='evidence_b5a23d07c381473f9fca8e34a6906cd3')
+
+    def test_concurrent_due_execution_has_one_ledger_effect(w):
+&gt;       service,plan,_=approved(w)
+                       ^^^^^^^^^^^
+
+tests/test_book_schedules.py:108: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_book_schedules.py:23: in approved
+    service,plan,journal=make_plan(w,kind,**changes)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_book_schedules.py:13: in make_plan
+    journal=w.post(tx)
+            ^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = World(db=&lt;price.db.Database object at 0x79614eda8050&gt;, svc=&lt;price.service.Service object at 0x79614eda8150&gt;, company='...cd8350e53a51a3a', username='other-owner', csrf='', worker=False), evidence='evidence_b5a23d07c381473f9fca8e34a6906cd3')
+tx = {'author': 'user_4bd030136c404b22a9fd9993a8a4140d', 'business_purpose': '검증용 용역', 'contract': '', 'counterparty': '테스트 고객', ...}
+
+    def post(self, tx):
+        j = self.analyze(tx)['journal']
+&gt;       j = self.svc.transition_journal(self.reviewer, self.company, j['id'], 'approve', j['revision'], '독립 검토')
+                                                                     ^^^^^^^
+E       TypeError: 'NoneType' object is not subscriptable
+
+tests/conftest.py:36: TypeError</failure></testcase><testcase classname="tests.test_book_schedules" name="test_source_reversal_blocks_pending_schedule" time="0.003"><failure message="TypeError: 'NoneType' object is not subscriptable">w = World(db=&lt;price.db.Database object at 0x79614eda8a50&gt;, svc=&lt;price.service.Service object at 0x79614eda8b50&gt;, company='...cd8350e53a51a3a', username='other-owner', csrf='', worker=False), evidence='evidence_d1a13e120957463996d4c973b9ccf88a')
+
+    def test_source_reversal_blocks_pending_schedule(w):
+&gt;       service,plan,original=approved(w)
+                              ^^^^^^^^^^^
+
+tests/test_book_schedules.py:116: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_book_schedules.py:23: in approved
+    service,plan,journal=make_plan(w,kind,**changes)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_book_schedules.py:13: in make_plan
+    journal=w.post(tx)
+            ^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = World(db=&lt;price.db.Database object at 0x79614eda8a50&gt;, svc=&lt;price.service.Service object at 0x79614eda8b50&gt;, company='...cd8350e53a51a3a', username='other-owner', csrf='', worker=False), evidence='evidence_d1a13e120957463996d4c973b9ccf88a')
+tx = {'author': 'user_4bd030136c404b22a9fd9993a8a4140d', 'business_purpose': '검증용 용역', 'contract': '', 'counterparty': '테스트 고객', ...}
+
+    def post(self, tx):
+        j = self.analyze(tx)['journal']
+&gt;       j = self.svc.transition_journal(self.reviewer, self.company, j['id'], 'approve', j['revision'], '독립 검토')
+                                                                     ^^^^^^^
+E       TypeError: 'NoneType' object is not subscriptable
+
+tests/conftest.py:36: TypeError</failure></testcase><testcase classname="tests.test_book_schedules" name="test_cancel_after_partial_keeps_posted_entries_and_remainder" time="0.003"><failure message="TypeError: 'NoneType' object is not subscriptable">w = World(db=&lt;price.db.Database object at 0x79614ed8b5c0&gt;, svc=&lt;price.service.Service object at 0x79614ed8b7a0&gt;, company='...cd8350e53a51a3a', username='other-owner', csrf='', worker=False), evidence='evidence_14cbb439ef8846acb579bca97c016b4c')
+
+    def test_cancel_after_partial_keeps_posted_entries_and_remainder(w):
+&gt;       service,plan,_=approved(w)
+                       ^^^^^^^^^^^
+
+tests/test_book_schedules.py:126: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_book_schedules.py:23: in approved
+    service,plan,journal=make_plan(w,kind,**changes)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_book_schedules.py:13: in make_plan
+    journal=w.post(tx)
+            ^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = World(db=&lt;price.db.Database object at 0x79614ed8b5c0&gt;, svc=&lt;price.service.Service object at 0x79614ed8b7a0&gt;, company='...cd8350e53a51a3a', username='other-owner', csrf='', worker=False), evidence='evidence_14cbb439ef8846acb579bca97c016b4c')
+tx = {'author': 'user_4bd030136c404b22a9fd9993a8a4140d', 'business_purpose': '검증용 용역', 'contract': '', 'counterparty': '테스트 고객', ...}
+
+    def post(self, tx):
+        j = self.analyze(tx)['journal']
+&gt;       j = self.svc.transition_journal(self.reviewer, self.company, j['id'], 'approve', j['revision'], '독립 검토')
+                                                                     ^^^^^^^
+E       TypeError: 'NoneType' object is not subscriptable
+
+tests/conftest.py:36: TypeError</failure></testcase><testcase classname="tests.test_book_schedules" name="test_future_date_and_cross_company_blocked" time="0.003"><failure message="TypeError: 'NoneType' object is not subscriptable">w = World(db=&lt;price.db.Database object at 0x79614edd06e0&gt;, svc=&lt;price.service.Service object at 0x79614edd08c0&gt;, company='...cd8350e53a51a3a', username='other-owner', csrf='', worker=False), evidence='evidence_d1fbefeb43a541daaacf0026cbbc6b69')
+
+    def test_future_date_and_cross_company_blocked(w):
+&gt;       service,plan,_=approved(w)
+                       ^^^^^^^^^^^
+
+tests/test_book_schedules.py:136: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_book_schedules.py:23: in approved
+    service,plan,journal=make_plan(w,kind,**changes)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_book_schedules.py:13: in make_plan
+    journal=w.post(tx)
+            ^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = World(db=&lt;price.db.Database object at 0x79614edd06e0&gt;, svc=&lt;price.service.Service object at 0x79614edd08c0&gt;, company='...cd8350e53a51a3a', username='other-owner', csrf='', worker=False), evidence='evidence_d1fbefeb43a541daaacf0026cbbc6b69')
+tx = {'author': 'user_4bd030136c404b22a9fd9993a8a4140d', 'business_purpose': '검증용 용역', 'contract': '', 'counterparty': '테스트 고객', ...}
+
+    def post(self, tx):
+        j = self.analyze(tx)['journal']
+&gt;       j = self.svc.transition_journal(self.reviewer, self.company, j['id'], 'approve', j['revision'], '독립 검토')
+                                                                     ^^^^^^^
+E       TypeError: 'NoneType' object is not subscriptable
+
+tests/conftest.py:36: TypeError</failure></testcase><testcase classname="tests.test_book_schedules" name="test_zero_depreciable_asset_posts_reclass_without_zero_lines" time="0.003"><failure message="TypeError: 'NoneType' object is not subscriptable">w = World(db=&lt;price.db.Database object at 0x79614eef5c50&gt;, svc=&lt;price.service.Service object at 0x79614eef5b70&gt;, company='...cd8350e53a51a3a', username='other-owner', csrf='', worker=False), evidence='evidence_ccdb412e726647e9b76072a394bf51f0')
+
+    def test_zero_depreciable_asset_posts_reclass_without_zero_lines(w):
+&gt;       service,plan,_=approved(w,'asset',salvage=1001)
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_book_schedules.py:142: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_book_schedules.py:23: in approved
+    service,plan,journal=make_plan(w,kind,**changes)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_book_schedules.py:13: in make_plan
+    journal=w.post(tx)
+            ^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = World(db=&lt;price.db.Database object at 0x79614eef5c50&gt;, svc=&lt;price.service.Service object at 0x79614eef5b70&gt;, company='...cd8350e53a51a3a', username='other-owner', csrf='', worker=False), evidence='evidence_ccdb412e726647e9b76072a394bf51f0')
+tx = {'author': 'user_4bd030136c404b22a9fd9993a8a4140d', 'business_purpose': '검증용 용역', 'contract': '', 'counterparty': '테스트 고객', ...}
+
+    def post(self, tx):
+        j = self.analyze(tx)['journal']
+&gt;       j = self.svc.transition_journal(self.reviewer, self.company, j['id'], 'approve', j['revision'], '독립 검토')
+                                                                     ^^^^^^^
+E       TypeError: 'NoneType' object is not subscriptable
+
+tests/conftest.py:36: TypeError</failure></testcase><testcase classname="tests.test_finance_ops" name="test_day_allocation_preserves_odd_krw_and_leap_year" time="0.000" /><testcase classname="tests.test_finance_ops" name="test_straight_line_cost_and_salvage_across_year" time="0.000" /><testcase classname="tests.test_finance_ops" name="test_non_integer_schedule_cost_rejected[True]" time="0.000" /><testcase classname="tests.test_finance_ops" name="test_non_integer_schedule_cost_rejected[-1]" time="0.000" /><testcase classname="tests.test_finance_ops" name="test_non_integer_schedule_cost_rejected[1.0]" time="0.000" /><testcase classname="tests.test_finance_ops" name="test_non_integer_schedule_cost_rejected[1]" time="0.000" /><testcase classname="tests.test_finance_ops" name="test_period_limits_and_nonexistent_inventory" time="0.000" /><testcase classname="tests.test_finance_ops" name="test_fifo_conserves_rounding_across_multiple_consumptions" time="0.000" /><testcase classname="tests.test_finance_ops" name="test_missing_upload_cannot_be_hidden_by_manual_source_attestation" time="0.014" /><testcase classname="tests.test_finance_ops" name="test_cash_receipt_not_same_as_accrued_revenue" time="0.005" /><testcase classname="tests.test_finance_ops" name="test_schedule_proposal_requires_source_and_never_posts" time="0.003" /></testsuite></testsuites>

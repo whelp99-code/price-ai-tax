@@ -1,0 +1,21 @@
+{
+  "schema": "price.pending-owner-operation/1",
+  "project": "price",
+  "operation": "Install hash-pinned optional xlrd wheel in project-local virtual environment",
+  "command": "uv venv --python /usr/bin/python3 --system-site-packages .venv && uv pip install --python .venv/bin/python --only-binary :all: --no-deps --require-hashes -r requirements-readers.lock",
+  "status": "NOT_EXECUTED_APPROVAL_REQUIRED",
+  "approval_id": "e4233ae4-7ed8-4b84-a08e-80b6d83cde34",
+  "approval_expires_at_ms": 1790605038328,
+  "approval_url": "http://127.0.0.1:7979/admin/shell-approvals/e4233ae4-7ed8-4b84-a08e-80b6d83cde34",
+  "private_owner_token_requested_in_chat": false,
+  "system_packages_modified": false,
+  "gate_bypassed": false,
+  "final_release_accepted": false,
+  "unrelated_allowed_local_verification": {
+    "tests_passed": 494,
+    "tests_failed": 0,
+    "browser_checks_passed": 23,
+    "api_running_at_last_check": true,
+    "worker_running_at_last_check": true
+  }
+}

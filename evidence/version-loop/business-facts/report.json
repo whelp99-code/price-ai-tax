@@ -1,0 +1,72 @@
+{
+  "started_at": "2026-09-29T05:35:48.556Z",
+  "data": "synthetic only",
+  "checks": [
+    {
+      "name": "originals upload without mapping or manual transactions",
+      "status": "PASS"
+    },
+    {
+      "name": "company identity automatically read from document",
+      "status": "PASS"
+    },
+    {
+      "name": "explicit invoice reference and party link purchase to payment automatically",
+      "status": "PASS"
+    },
+    {
+      "name": "answering factual questions advances workflow without accounts or tax inputs",
+      "status": "PASS"
+    },
+    {
+      "name": "bank purpose is not redundantly asked after source-proven settlement",
+      "status": "PASS"
+    },
+    {
+      "name": "no false posting completion",
+      "status": "PASS"
+    },
+    {
+      "name": "facts retain source or owner basis",
+      "status": "PASS"
+    },
+    {
+      "name": "runtime policy posting still not silently enabled",
+      "status": "PASS"
+    },
+    {
+      "name": "release gate does not invent V10 acceptance",
+      "status": "PASS"
+    },
+    {
+      "name": "mobile overflow upload",
+      "status": "PASS"
+    },
+    {
+      "name": "mobile overflow questions",
+      "status": "PASS"
+    },
+    {
+      "name": "mobile overflow results",
+      "status": "PASS"
+    },
+    {
+      "name": "same owner account throughout",
+      "status": "PASS"
+    },
+    {
+      "name": "no uncaught JavaScript errors",
+      "status": "PASS"
+    }
+  ],
+  "screenshots": [
+    "evidence/version-loop/business-facts/facts-results-desktop.png",
+    "evidence/version-loop/business-facts/facts-mobile.png"
+  ],
+  "live_filing": false,
+  "policy_modified": false,
+  "sandbox_disabled": false,
+  "status": "PASS",
+  "own_processes_stopped": true,
+  "finished_at": "2026-09-29T05:35:57.097Z"
+}

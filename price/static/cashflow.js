@@ -1,0 +1,30 @@
+'use strict';
+const el=s=>document.querySelector(s);
+const data={company:'',csrf:'',companies:[],selection:null,loading:false,generation:0};
+function node(tag,text,css){const e=document.createElement(tag);if(text!==undefined)e.textContent=String(text);if(css)e.className=css;return e;}
+function action(label,fn,css='quiet'){const e=node('button',label,css);e.type='button';e.addEventListener('click',()=>Promise.resolve(fn()).catch(error=>{el('#cash-error').textContent=error.message;}));return e;}
+async function api(path,body){const headers={};if(body!==undefined){headers['content-type']='application/json';headers['x-csrf-token']=data.csrf;}const response=await fetch('/api/companies/'+encodeURIComponent(data.company)+path,{method:body===undefined?'GET':'POST',credentials:'same-origin',headers,body:body===undefined?undefined:JSON.stringify(body)});let value;try{value=await response.json();}catch{throw Error('서버 응답을 읽지 못했습니다.');}if(!response.ok)throw Error(value.message||'처리 권한과 현재 상태를 확인하세요.');return value;}
+const stateLabel=s=>({DRAFT:'내부 대조 필요',APPROVED:'독립 검토됨',POSTED:'장부 반영됨',SOURCE_CHANGED:'원본 변경·재확인'}[s]||s);
+const operationLabel=s=>({invoice_charge:'원매입 → 카드채무',cancellation:'카드 원승인 취소',billing:'카드 납부·환급'}[s]||'회사 계좌 사이 이동');
+async function detail(kind,item,review=false){
+ data.selection={kind,item,company:data.company};const selection=data.selection;
+ el('#cash-dialog-error').textContent='';const box=el('#cash-detail');box.replaceChildren(node('p','원본을 확인한 후 검토하세요. 작성자와 원본 제출자는 자신의 내용을 승인할 수 없습니다.'));const form=el('#cash-review-form');form.reset();form.hidden=!review;el('#cash-dialog').showModal();
+ try{
+  const original=await api('/'+kind+'/'+encodeURIComponent(item.id));
+  if(data.selection!==selection||data.company!==selection.company)return;
+  const b=original.basis;box.append(node('p','금액 '+b.amount.toLocaleString('ko-KR')+'원 · '+(b.date||b.event_date),'note'));
+  const response=await api('/owner/events');
+  if(data.selection!==selection||data.company!==selection.company)return;
+  const events=Array.isArray(response)?response:response.events;
+  const ids=b.event_ids||[b.source_event_id,...(b.references||[]).map(x=>x.invoice_id).filter(Boolean)];
+  for(const id of ids){const event=events.find(e=>e.id===id);if(!event){box.append(node('p','원본 거래 조회가 필요합니다: '+id,'error'));continue;}const d=node('div',undefined,'panel');d.append(node('strong',event.display_counterparty),node('p',(event.values.date||'')+' · '+(event.values.gross||'')+' '+(event.values.currency||'')),node('p','원본 참조: '+(event.values.reference||'없음'),'small'),node('p','자료 ID: '+event.document_ids.join(', '),'small'));box.append(d);}
+  box.append(node('pre',JSON.stringify({source_references:b.references||b.event_ids,reviewed_by:original.reviewed_by,state:original.state,bank_transfer_initiated:false},null,2)));
+ }catch(error){if(data.selection===selection&&data.company===selection.company)el('#cash-dialog-error').textContent=error.message;}
+}
+function render(root,items,kind){root.replaceChildren();const role=data.companies.find(c=>c.id===data.company)?.role;for(const item of items){const row=node('div',undefined,'document');row.dataset.plan=item.id;row.dataset.kind=kind;const label=node('div');label.append(node('strong',operationLabel(item.operation)+' · '+Number(item.amount).toLocaleString('ko-KR')+'원'),node('p',item.date+' · '+stateLabel(item.state)));const buttons=node('div',undefined,'actions');buttons.append(action('원본 보기',()=>detail(kind,item)));if(item.state==='DRAFT'&&role==='reviewer')buttons.append(action('독립 검토',()=>detail(kind,item,true),'primary'));if(item.state==='APPROVED'&&role!=='viewer')buttons.append(action('장부 반영',async()=>{await api('/'+kind+'/'+item.id+'/post',{});await refresh();},'primary'));row.append(label,buttons);root.append(row);}if(!items.length)root.append(node('p','아직 자동 연결된 항목이 없습니다. 원본 참조가 명확해지면 표시됩니다.','empty'));}
+async function refresh(){if(!data.company||data.loading)return;data.loading=true;const generation=++data.generation;const company=data.company;try{const [transfers,cards]=await Promise.all([api('/owner/internal-transfers'),api('/owner/card-books')]);if(generation!==data.generation||company!==data.company)return;render(el('#transfer-work'),transfers.items,'internal-transfers');render(el('#card-work'),cards.items,'card-books');el('#cash-error').textContent='';}catch(error){if(company===data.company)el('#cash-error').textContent=error.message;}finally{data.loading=false;if(company!==data.company)refresh();}}
+el('#cash-review-form').addEventListener('submit',async event=>{event.preventDefault();const selection=data.selection;if(!selection)return;const form=event.currentTarget;const submit=form.querySelector('button');submit.disabled=true;try{await api('/'+selection.kind+'/'+selection.item.id+'/approve',{expected_revision:selection.item.revision,reason:form.elements.reason.value});el('#cash-dialog').close();data.selection=null;await refresh();}catch(error){el('#cash-dialog-error').textContent=error.message;}finally{submit.disabled=false;}});
+el('#cash-close').addEventListener('click',()=>{data.selection=null;el('#cash-dialog').close();});
+el('#cash-refresh').addEventListener('click',refresh);
+el('#cash-company').addEventListener('change',event=>{data.generation++;data.company=event.target.value;data.selection=null;el('#cash-dialog').close();el('#transfer-work').replaceChildren();el('#card-work').replaceChildren();refresh();});
+fetch('/api/session',{credentials:'same-origin'}).then(async response=>{if(!response.ok)throw Error('먼저 대표 자료함에서 본인 계정으로 로그인하세요.');const session=await response.json();data.csrf=session.csrf;data.companies=session.companies;for(const company of data.companies){const option=node('option',company.name+' · '+company.role);option.value=company.id;el('#cash-company').append(option);}data.company=data.companies[0]?.id||'';el('#cash-user').textContent='접속 사용자: '+session.username;await refresh();}).catch(error=>{el('#cash-error').textContent=error.message;});

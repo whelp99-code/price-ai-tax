@@ -1,0 +1,253 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="13" skipped="0" tests="13" time="0.775" timestamp="2026-09-29T13:53:28.699175+09:00" hostname="jm-acloud"><testcase classname="tests.test_internal_transfers" name="test_source_only_builds_one_plan_without_manual_account_selection" time="0.410"><failure message="ValueError: too many values to unpack (expected 2, got 3)">tests/test_internal_transfers.py:41: in test_source_only_builds_one_plan_without_manual_account_selection
+    e,_=setup(w);items=e.list(w.owner,w.company)['items']
+        ^^^^^^^^
+tests/test_internal_transfers.py:30: in setup
+    engine=InternalTransfers(w.svc,today=lambda:date(2026,9,30));engine.refresh(w.owner,w.company)
+                                                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+price/internal_transfers.py:90: in refresh
+    return {'created':self._refresh(c,company,actor.id)}
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+price/internal_transfers.py:77: in _refresh
+    pairs=self._pairs(c,company);created=[]
+          ^^^^^^^^^^^^^^^^^^^^^^
+price/internal_transfers.py:44: in _pairs
+    try:event=self.work._fresh_event(c,company,raw['id'],context=context)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+price/casework.py:171: in _fresh_event
+    by_id,profile=context if context is not None else self._source_context(c,company)
+    ^^^^^^^^^^^^^
+E   ValueError: too many values to unpack (expected 2, got 3)</failure></testcase><testcase classname="tests.test_internal_transfers" name="test_reviewed_transfer_posts_two_real_immutable_balanced_legs" time="0.010"><failure message="ValueError: too many values to unpack (expected 2, got 3)">tests/test_internal_transfers.py:52: in test_reviewed_transfer_posts_two_real_immutable_balanced_legs
+    e,p=reviewed(w);result=e.post(w.owner,w.company,p['id'])
+        ^^^^^^^^^^^
+tests/test_internal_transfers.py:35: in reviewed
+    e,_=setup(w);p=e.list(w.owner,w.company)['items'][0]
+        ^^^^^^^^
+tests/test_internal_transfers.py:30: in setup
+    engine=InternalTransfers(w.svc,today=lambda:date(2026,9,30));engine.refresh(w.owner,w.company)
+                                                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+price/internal_transfers.py:90: in refresh
+    return {'created':self._refresh(c,company,actor.id)}
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+price/internal_transfers.py:77: in _refresh
+    pairs=self._pairs(c,company);created=[]
+          ^^^^^^^^^^^^^^^^^^^^^^
+price/internal_transfers.py:44: in _pairs
+    try:event=self.work._fresh_event(c,company,raw['id'],context=context)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+price/casework.py:171: in _fresh_event
+    by_id,profile=context if context is not None else self._source_context(c,company)
+    ^^^^^^^^^^^^^
+E   ValueError: too many values to unpack (expected 2, got 3)</failure></testcase><testcase classname="tests.test_internal_transfers" name="test_internal_cash_movement_is_not_income_expense_or_external_cash_flow" time="0.010"><failure message="ValueError: too many values to unpack (expected 2, got 3)">tests/test_internal_transfers.py:65: in test_internal_cash_movement_is_not_income_expense_or_external_cash_flow
+    e,p=reviewed(w);e.post(w.owner,w.company,p['id'])
+        ^^^^^^^^^^^
+tests/test_internal_transfers.py:35: in reviewed
+    e,_=setup(w);p=e.list(w.owner,w.company)['items'][0]
+        ^^^^^^^^
+tests/test_internal_transfers.py:30: in setup
+    engine=InternalTransfers(w.svc,today=lambda:date(2026,9,30));engine.refresh(w.owner,w.company)
+                                                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+price/internal_transfers.py:90: in refresh
+    return {'created':self._refresh(c,company,actor.id)}
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+price/internal_transfers.py:77: in _refresh
+    pairs=self._pairs(c,company);created=[]
+          ^^^^^^^^^^^^^^^^^^^^^^
+price/internal_transfers.py:44: in _pairs
+    try:event=self.work._fresh_event(c,company,raw['id'],context=context)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+price/casework.py:171: in _fresh_event
+    by_id,profile=context if context is not None else self._source_context(c,company)
+    ^^^^^^^^^^^^^
+E   ValueError: too many values to unpack (expected 2, got 3)</failure></testcase><testcase classname="tests.test_internal_transfers" name="test_no_guessing_from_amount_or_one_sided_reference[options0]" time="0.010"><failure message="ValueError: too many values to unpack (expected 2, got 3)">tests/test_internal_transfers.py:75: in test_no_guessing_from_amount_or_one_sided_reference
+    e,_=setup(w,**options)
+        ^^^^^^^^^^^^^^^^^^
+tests/test_internal_transfers.py:30: in setup
+    engine=InternalTransfers(w.svc,today=lambda:date(2026,9,30));engine.refresh(w.owner,w.company)
+                                                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+price/internal_transfers.py:90: in refresh
+    return {'created':self._refresh(c,company,actor.id)}
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+price/internal_transfers.py:77: in _refresh
+    pairs=self._pairs(c,company);created=[]
+          ^^^^^^^^^^^^^^^^^^^^^^
+price/internal_transfers.py:44: in _pairs
+    try:event=self.work._fresh_event(c,company,raw['id'],context=context)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+price/casework.py:171: in _fresh_event
+    by_id,profile=context if context is not None else self._source_context(c,company)
+    ^^^^^^^^^^^^^
+E   ValueError: too many values to unpack (expected 2, got 3)</failure></testcase><testcase classname="tests.test_internal_transfers" name="test_no_guessing_from_amount_or_one_sided_reference[options1]" time="0.010"><failure message="ValueError: too many values to unpack (expected 2, got 3)">tests/test_internal_transfers.py:75: in test_no_guessing_from_amount_or_one_sided_reference
+    e,_=setup(w,**options)
+        ^^^^^^^^^^^^^^^^^^
+tests/test_internal_transfers.py:30: in setup
+    engine=InternalTransfers(w.svc,today=lambda:date(2026,9,30));engine.refresh(w.owner,w.company)
+                                                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+price/internal_transfers.py:90: in refresh
+    return {'created':self._refresh(c,company,actor.id)}
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+price/internal_transfers.py:77: in _refresh
+    pairs=self._pairs(c,company);created=[]
+          ^^^^^^^^^^^^^^^^^^^^^^
+price/internal_transfers.py:44: in _pairs
+    try:event=self.work._fresh_event(c,company,raw['id'],context=context)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+price/casework.py:171: in _fresh_event
+    by_id,profile=context if context is not None else self._source_context(c,company)
+    ^^^^^^^^^^^^^
+E   ValueError: too many values to unpack (expected 2, got 3)</failure></testcase><testcase classname="tests.test_internal_transfers" name="test_no_guessing_from_amount_or_one_sided_reference[options2]" time="0.010"><failure message="ValueError: too many values to unpack (expected 2, got 3)">tests/test_internal_transfers.py:75: in test_no_guessing_from_amount_or_one_sided_reference
+    e,_=setup(w,**options)
+        ^^^^^^^^^^^^^^^^^^
+tests/test_internal_transfers.py:30: in setup
+    engine=InternalTransfers(w.svc,today=lambda:date(2026,9,30));engine.refresh(w.owner,w.company)
+                                                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+price/internal_transfers.py:90: in refresh
+    return {'created':self._refresh(c,company,actor.id)}
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+price/internal_transfers.py:77: in _refresh
+    pairs=self._pairs(c,company);created=[]
+          ^^^^^^^^^^^^^^^^^^^^^^
+price/internal_transfers.py:44: in _pairs
+    try:event=self.work._fresh_event(c,company,raw['id'],context=context)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+price/casework.py:171: in _fresh_event
+    by_id,profile=context if context is not None else self._source_context(c,company)
+    ^^^^^^^^^^^^^
+E   ValueError: too many values to unpack (expected 2, got 3)</failure></testcase><testcase classname="tests.test_internal_transfers" name="test_no_guessing_from_amount_or_one_sided_reference[options3]" time="0.010"><failure message="ValueError: too many values to unpack (expected 2, got 3)">tests/test_internal_transfers.py:75: in test_no_guessing_from_amount_or_one_sided_reference
+    e,_=setup(w,**options)
+        ^^^^^^^^^^^^^^^^^^
+tests/test_internal_transfers.py:30: in setup
+    engine=InternalTransfers(w.svc,today=lambda:date(2026,9,30));engine.refresh(w.owner,w.company)
+                                                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+price/internal_transfers.py:90: in refresh
+    return {'created':self._refresh(c,company,actor.id)}
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+price/internal_transfers.py:77: in _refresh
+    pairs=self._pairs(c,company);created=[]
+          ^^^^^^^^^^^^^^^^^^^^^^
+price/internal_transfers.py:44: in _pairs
+    try:event=self.work._fresh_event(c,company,raw['id'],context=context)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+price/casework.py:171: in _fresh_event
+    by_id,profile=context if context is not None else self._source_context(c,company)
+    ^^^^^^^^^^^^^
+E   ValueError: too many values to unpack (expected 2, got 3)</failure></testcase><testcase classname="tests.test_internal_transfers" name="test_no_self_review_no_viewer_writes_no_cross_company" time="0.010"><failure message="ValueError: too many values to unpack (expected 2, got 3)">tests/test_internal_transfers.py:81: in test_no_self_review_no_viewer_writes_no_cross_company
+    e,_=setup(w);p=e.list(w.owner,w.company)['items'][0]
+        ^^^^^^^^
+tests/test_internal_transfers.py:30: in setup
+    engine=InternalTransfers(w.svc,today=lambda:date(2026,9,30));engine.refresh(w.owner,w.company)
+                                                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+price/internal_transfers.py:90: in refresh
+    return {'created':self._refresh(c,company,actor.id)}
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+price/internal_transfers.py:77: in _refresh
+    pairs=self._pairs(c,company);created=[]
+          ^^^^^^^^^^^^^^^^^^^^^^
+price/internal_transfers.py:44: in _pairs
+    try:event=self.work._fresh_event(c,company,raw['id'],context=context)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+price/casework.py:171: in _fresh_event
+    by_id,profile=context if context is not None else self._source_context(c,company)
+    ^^^^^^^^^^^^^
+E   ValueError: too many values to unpack (expected 2, got 3)</failure></testcase><testcase classname="tests.test_internal_transfers" name="test_source_reprocessing_invalidates_unused_review" time="0.010"><failure message="ValueError: too many values to unpack (expected 2, got 3)">tests/test_internal_transfers.py:89: in test_source_reprocessing_invalidates_unused_review
+    e,p=reviewed(w);ext=Extractions(w.svc);doc=ext.uploads.document(w.owner,w.company,p['document_ids'][0])
+        ^^^^^^^^^^^
+tests/test_internal_transfers.py:35: in reviewed
+    e,_=setup(w);p=e.list(w.owner,w.company)['items'][0]
+        ^^^^^^^^
+tests/test_internal_transfers.py:30: in setup
+    engine=InternalTransfers(w.svc,today=lambda:date(2026,9,30));engine.refresh(w.owner,w.company)
+                                                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+price/internal_transfers.py:90: in refresh
+    return {'created':self._refresh(c,company,actor.id)}
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+price/internal_transfers.py:77: in _refresh
+    pairs=self._pairs(c,company);created=[]
+          ^^^^^^^^^^^^^^^^^^^^^^
+price/internal_transfers.py:44: in _pairs
+    try:event=self.work._fresh_event(c,company,raw['id'],context=context)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+price/casework.py:171: in _fresh_event
+    by_id,profile=context if context is not None else self._source_context(c,company)
+    ^^^^^^^^^^^^^
+E   ValueError: too many values to unpack (expected 2, got 3)</failure></testcase><testcase classname="tests.test_internal_transfers" name="test_new_ambiguous_match_revokes_old_unique_relationship" time="0.010"><failure message="ValueError: too many values to unpack (expected 2, got 3)">tests/test_internal_transfers.py:96: in test_new_ambiguous_match_revokes_old_unique_relationship
+    e,p=reviewed(w)
+        ^^^^^^^^^^^
+tests/test_internal_transfers.py:35: in reviewed
+    e,_=setup(w);p=e.list(w.owner,w.company)['items'][0]
+        ^^^^^^^^
+tests/test_internal_transfers.py:30: in setup
+    engine=InternalTransfers(w.svc,today=lambda:date(2026,9,30));engine.refresh(w.owner,w.company)
+                                                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+price/internal_transfers.py:90: in refresh
+    return {'created':self._refresh(c,company,actor.id)}
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+price/internal_transfers.py:77: in _refresh
+    pairs=self._pairs(c,company);created=[]
+          ^^^^^^^^^^^^^^^^^^^^^^
+price/internal_transfers.py:44: in _pairs
+    try:event=self.work._fresh_event(c,company,raw['id'],context=context)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+price/casework.py:171: in _fresh_event
+    by_id,profile=context if context is not None else self._source_context(c,company)
+    ^^^^^^^^^^^^^
+E   ValueError: too many values to unpack (expected 2, got 3)</failure></testcase><testcase classname="tests.test_internal_transfers" name="test_reviewer_revocation_and_period_lock_prevent_both_legs" time="0.011"><failure message="ValueError: too many values to unpack (expected 2, got 3)">tests/test_internal_transfers.py:103: in test_reviewer_revocation_and_period_lock_prevent_both_legs
+    e,p=reviewed(w)
+        ^^^^^^^^^^^
+tests/test_internal_transfers.py:35: in reviewed
+    e,_=setup(w);p=e.list(w.owner,w.company)['items'][0]
+        ^^^^^^^^
+tests/test_internal_transfers.py:30: in setup
+    engine=InternalTransfers(w.svc,today=lambda:date(2026,9,30));engine.refresh(w.owner,w.company)
+                                                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+price/internal_transfers.py:90: in refresh
+    return {'created':self._refresh(c,company,actor.id)}
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+price/internal_transfers.py:77: in _refresh
+    pairs=self._pairs(c,company);created=[]
+          ^^^^^^^^^^^^^^^^^^^^^^
+price/internal_transfers.py:44: in _pairs
+    try:event=self.work._fresh_event(c,company,raw['id'],context=context)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+price/casework.py:171: in _fresh_event
+    by_id,profile=context if context is not None else self._source_context(c,company)
+    ^^^^^^^^^^^^^
+E   ValueError: too many values to unpack (expected 2, got 3)</failure></testcase><testcase classname="tests.test_internal_transfers" name="test_concurrent_post_has_exactly_two_legs" time="0.011"><failure message="ValueError: too many values to unpack (expected 2, got 3)">tests/test_internal_transfers.py:110: in test_concurrent_post_has_exactly_two_legs
+    e,p=reviewed(w)
+        ^^^^^^^^^^^
+tests/test_internal_transfers.py:35: in reviewed
+    e,_=setup(w);p=e.list(w.owner,w.company)['items'][0]
+        ^^^^^^^^
+tests/test_internal_transfers.py:30: in setup
+    engine=InternalTransfers(w.svc,today=lambda:date(2026,9,30));engine.refresh(w.owner,w.company)
+                                                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+price/internal_transfers.py:90: in refresh
+    return {'created':self._refresh(c,company,actor.id)}
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+price/internal_transfers.py:77: in _refresh
+    pairs=self._pairs(c,company);created=[]
+          ^^^^^^^^^^^^^^^^^^^^^^
+price/internal_transfers.py:44: in _pairs
+    try:event=self.work._fresh_event(c,company,raw['id'],context=context)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+price/casework.py:171: in _fresh_event
+    by_id,profile=context if context is not None else self._source_context(c,company)
+    ^^^^^^^^^^^^^
+E   ValueError: too many values to unpack (expected 2, got 3)</failure></testcase><testcase classname="tests.test_internal_transfers" name="test_source_participant_cannot_approve_worker_generated_plan" time="0.010"><failure message="ValueError: too many values to unpack (expected 2, got 3)">tests/test_internal_transfers.py:117: in test_source_participant_cannot_approve_worker_generated_plan
+    e,p=setup(w);items=e.list(w.owner,w.company)['items'];plan=items[0]
+        ^^^^^^^^
+tests/test_internal_transfers.py:30: in setup
+    engine=InternalTransfers(w.svc,today=lambda:date(2026,9,30));engine.refresh(w.owner,w.company)
+                                                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+price/internal_transfers.py:90: in refresh
+    return {'created':self._refresh(c,company,actor.id)}
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+price/internal_transfers.py:77: in _refresh
+    pairs=self._pairs(c,company);created=[]
+          ^^^^^^^^^^^^^^^^^^^^^^
+price/internal_transfers.py:44: in _pairs
+    try:event=self.work._fresh_event(c,company,raw['id'],context=context)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+price/casework.py:171: in _fresh_event
+    by_id,profile=context if context is not None else self._source_context(c,company)
+    ^^^^^^^^^^^^^
+E   ValueError: too many values to unpack (expected 2, got 3)</failure></testcase></testsuite></testsuites>

@@ -1,0 +1,24 @@
+{
+  "project": "price",
+  "worker": "price",
+  "root": "/home/jm/orca/projects/price",
+  "api_running": true,
+  "api_health": {
+    "ok": true,
+    "project": "price",
+    "worker": "price",
+    "product": "AI 세무사",
+    "version": "0.2.1",
+    "mode": "validation",
+    "live_filing": false
+  },
+  "worker_running": true,
+  "url": "http://127.0.0.1:4381",
+  "bind": "127.0.0.1",
+  "database": "/home/jm/orca/projects/price/.data/demo.sqlite3",
+  "api_pid": 2920241,
+  "worker_pid": 2920250,
+  "system_service_installed": false,
+  "orca_worker_registered": false,
+  "demo_only": true
+}

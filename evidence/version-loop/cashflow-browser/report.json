@@ -1,0 +1,70 @@
+{
+  "started_at": "2026-09-29T05:36:11.212Z",
+  "data": "synthetic test fixtures only",
+  "checks": [
+    {
+      "name": "owner is not offered self-review buttons",
+      "status": "PASS"
+    },
+    {
+      "name": "source detail loaded without runtime error cardbook_59a1d91b9243b25a334dabb1a079c099a1aed01c7e915aabb758628795aa4ea5",
+      "status": "PASS"
+    },
+    {
+      "name": "card purchase settlement posts without duplicating expense",
+      "status": "PASS"
+    },
+    {
+      "name": "source detail loaded without runtime error cardbook_23204e6e294efcdf62f53f2660858bb1d277024078ad13c7f8a5f6d3b4a4a325",
+      "status": "PASS"
+    },
+    {
+      "name": "three documents retain one expense and one bank payment",
+      "status": "PASS"
+    },
+    {
+      "name": "card debt is zero after matched payment",
+      "status": "PASS"
+    },
+    {
+      "name": "owner sees card result without choosing tax treatment",
+      "status": "PASS"
+    },
+    {
+      "name": "owner cash results fit mobile viewport",
+      "status": "PASS"
+    },
+    {
+      "name": "source detail loaded without runtime error transfer_aab18d70b98255f2041e5ef851e204f60e759a1f4edaa6657deb757e2d0fc69e",
+      "status": "PASS"
+    },
+    {
+      "name": "own-account transfer is not external cash flow or income",
+      "status": "PASS"
+    },
+    {
+      "name": "both legs are present and no bank transfer executed",
+      "status": "PASS"
+    },
+    {
+      "name": "unverified opening balance not shown as known zero",
+      "status": "PASS"
+    },
+    {
+      "name": "no browser JavaScript exceptions",
+      "status": "PASS"
+    }
+  ],
+  "screenshots": [
+    "evidence/version-loop/cashflow-browser/card-workbench-desktop.png",
+    "evidence/version-loop/cashflow-browser/owner-card-result.png",
+    "evidence/version-loop/cashflow-browser/owner-card-mobile.png",
+    "evidence/version-loop/cashflow-browser/transfer-workbench-desktop.png",
+    "evidence/version-loop/cashflow-browser/owner-transfer-result.png"
+  ],
+  "live_financial_execution": false,
+  "sandbox_disabled": false,
+  "status": "PASS",
+  "own_processes_stopped": true,
+  "finished_at": "2026-09-29T05:36:17.841Z"
+}

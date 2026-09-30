@@ -1,0 +1,101 @@
+{
+  "started_at": "2026-09-29T05:36:17.895Z",
+  "checks": [
+    {
+      "name": "owner and reviewer run in distinct browser profiles",
+      "status": "PASS"
+    },
+    {
+      "name": "unknown opening balance is not fabricated as zero",
+      "status": "PASS"
+    },
+    {
+      "name": "original-only upload creates parsed opening proposal with no owner account mapping",
+      "status": "PASS"
+    },
+    {
+      "name": "owner self-approval denied at real HTTP boundary",
+      "status": "PASS"
+    },
+    {
+      "name": "reviewer browser posts independently approved opening to actual ledger",
+      "status": "PASS"
+    },
+    {
+      "name": "prepaid actual expense and remaining value conserve 1001 won",
+      "status": "PASS"
+    },
+    {
+      "name": "asset depreciation actually posts to ledger",
+      "status": "PASS"
+    },
+    {
+      "name": "income statement includes period expense depreciation and COGS",
+      "status": "PASS"
+    },
+    {
+      "name": "balance sheet and cash reconcile to source-backed opening",
+      "status": "PASS"
+    },
+    {
+      "name": "owner sees exact FIFO remainder",
+      "status": "PASS"
+    },
+    {
+      "name": "owner sees period costs without accounting input fields",
+      "status": "PASS"
+    },
+    {
+      "name": "unclosed statements remain marked provisional",
+      "status": "PASS"
+    },
+    {
+      "name": "VAT workpaper maps fixed-asset and general purchases without double tax",
+      "status": "PASS"
+    },
+    {
+      "name": "VAT workpaper never claims actual filing or receipt",
+      "status": "PASS"
+    },
+    {
+      "name": "closed period changes report status only after successful closing",
+      "status": "PASS"
+    },
+    {
+      "name": "owner mobile has no horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "name": "reviewer mobile has no horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "name": "owner stayed books-owner throughout review in separate profile",
+      "status": "PASS"
+    },
+    {
+      "name": "no uncaught browser JavaScript errors",
+      "status": "PASS"
+    }
+  ],
+  "screenshots": [
+    "evidence/version-loop/real-bookkeeping/reviewer-reviewed-costs.png",
+    "evidence/version-loop/real-bookkeeping/owner-financial-results.png",
+    "evidence/version-loop/real-bookkeeping/owner-tax-summary.png",
+    "evidence/version-loop/real-bookkeeping/owner-mobile.png",
+    "evidence/version-loop/real-bookkeeping/reviewer-mobile.png"
+  ],
+  "synthetic_only": true,
+  "live_bank_transfers": false,
+  "live_filings": false,
+  "sandbox_disabled": false,
+  "status": "PASS",
+  "limitations": [
+    "Synthetic data and declared accounting assumptions only",
+    "No institutional format acceptance or professional-license verification",
+    "No live filing or payroll payment",
+    "Not full V10 acceptance"
+  ],
+  "finished_at": "2026-09-29T05:36:22.930Z",
+  "own_processes_stopped": true
+}

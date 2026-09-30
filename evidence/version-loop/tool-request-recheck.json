@@ -1,0 +1,29 @@
+{
+  "schema": "price.tool-request-recheck/1",
+  "date": "2026-09-28",
+  "project": "price",
+  "goal_id": "goal-1790591381082-3b906246",
+  "observed_result": "FILE_CREATION_AND_TEST_EXECUTION_SUCCEEDED",
+  "previous_block_internal_cause": "NOT_DISCLOSED_NOT_DETERMINED",
+  "security_or_approval_settings_modified": false,
+  "created_product_file": "price/upload_models.py",
+  "created_test_file": "tests/test_upload_models.py",
+  "targeted_tests": {
+    "passed": 77,
+    "failed": 0,
+    "report": "evidence/version-loop/upload-models-tests.xml"
+  },
+  "regression_tests": {
+    "passed": 179,
+    "failed": 0,
+    "warnings": 2,
+    "report": "evidence/version-loop/safety-request-regression.xml"
+  },
+  "release_status": "V01_PARTIAL_INPUT_CONTRACT_ONLY",
+  "limitations": [
+    "Metadata validation is not content scanning or an authenticated upload service.",
+    "The new models are not yet connected to upload endpoints, persistence, or owner UI.",
+    "No product release, service restart, live filing, payment, commit, or push was performed.",
+    "Successful calls do not guarantee approval of every future call."
+  ]
+}

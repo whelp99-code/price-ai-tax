@@ -1,0 +1,9 @@
+{
+  "version": "0.2.1",
+  "wheel_import": true,
+  "health": true,
+  "static_assets": true,
+  "schema": true,
+  "wheel": "artifacts/price_tax_agent-0.2.1-py3-none-any.whl",
+  "method": "isolated wheel extraction import; setuptools build; pip unavailable"
+}

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="3" skipped="0" tests="3" time="0.522" timestamp="2026-09-29T14:27:02.775928+09:00" hostname="jm-acloud"><testcase classname="tests.test_cashflow_reversals" name="test_internal_transfer_reversal_not_external_cash_receipt" time="0.417"><failure message="assert 1000 == 0">tests/test_cashflow_reversals.py:21: in test_internal_transfer_reversal_not_external_cash_receipt
+    assert report['cash']['received']==report['cash']['paid']==0
+E   assert 1000 == 0</failure></testcase><testcase classname="tests.test_cashflow_reversals" name="test_reversing_both_internal_legs_preserves_history_and_zero_net" time="0.023"><failure message="assert 1000 == 0">tests/test_cashflow_reversals.py:31: in test_reversing_both_internal_legs_preserves_history_and_zero_net
+    assert report['cash']['received']==report['cash']['paid']==0
+E   assert 1000 == 0</failure></testcase><testcase classname="tests.test_cashflow_reversals" name="test_card_balance_reflects_actual_reversal_not_stale_plan" time="0.036"><failure message="assert 1100 == 0">tests/test_cashflow_reversals.py:41: in test_card_balance_reflects_actual_reversal_not_stale_plan
+    assert report['balances'][CARD]==0
+E   assert 1100 == 0</failure></testcase></testsuite></testsuites>

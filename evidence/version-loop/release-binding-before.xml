@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="1" failures="0" skipped="0" tests="1" time="0.063" timestamp="2026-09-28T23:04:19.001575+09:00" hostname="jm-acloud"><testcase classname="" name="tests.test_release_source_binding" time="0.000"><error message="collection failure">ImportError while importing test module '/home/jm/orca/projects/price/tests/test_release_source_binding.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/usr/lib/python3.14/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_release_source_binding.py:5: in &lt;module&gt;
+    from price.release_readiness import runtime_source_manifest,verified_envelope
+E   ImportError: cannot import name 'runtime_source_manifest' from 'price.release_readiness' (/home/jm/orca/projects/price/price/release_readiness.py)</error></testcase></testsuite></testsuites>

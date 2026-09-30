@@ -1,0 +1,70 @@
+// Real browser / API / proposal-worker verification using two isolated fixtures.
+import fs from 'node:fs';import path from 'node:path';import net from 'node:net';
+import {spawn,execFileSync} from 'node:child_process';import {fileURLToPath} from 'node:url';
+const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
+const out=path.join(root,'evidence/version-loop/cashflow-browser');fs.mkdirSync(out,{recursive:true});fs.mkdirSync(path.join(root,'.data'),{recursive:true});
+const temp=fs.mkdtempSync(path.join(root,'.data/cashflow-browser-'));
+const report={started_at:new Date().toISOString(),data:'synthetic test fixtures only',checks:[],screenshots:[],live_financial_execution:false,sandbox_disabled:false};
+const processes=[];let ws,evaluate,cdp;const q=JSON.stringify,pause=ms=>new Promise(r=>setTimeout(r,ms));
+const port=()=>new Promise((resolve,reject)=>{const server=net.createServer();server.on('error',reject);server.listen(0,'127.0.0.1',()=>{const p=server.address().port;server.close(()=>resolve(p));});});
+function check(name,ok=true){if(!ok)throw Error(name);report.checks.push({name,status:'PASS'});}
+async function wait(fn,name,ms=14000){const end=Date.now()+ms;let last;while(Date.now()<end){try{if(await fn())return;}catch(e){last=e;}await pause(100);}throw Error(name+(last?' '+last.message:''));}
+try{
+ const db=path.join(temp,'cards.sqlite3');const fixture=JSON.parse(execFileSync('python3',['scripts/seed_cashflow_browser.py',db],{cwd:root,encoding:'utf8'}).trim());
+ const apiPort=await port(),transferPort=await port(),chromePort=await port();const url='http://127.0.0.1:'+apiPort,transferUrl='http://127.0.0.1:'+transferPort;
+ const launch=(name,args)=>{const fd=fs.openSync(path.join(out,name+'.log'),'w');const child=spawn(args[0],args.slice(1),{cwd:root,stdio:['ignore',fd,fd]});processes.push(child);return child;};
+ launch('card-api',['python3','-m','price','--db',db,'serve','--port',String(apiPort)]);
+ launch('transfer-api',['python3','-m','price','--db',fixture.transfer_db,'serve','--port',String(transferPort)]);
+ await wait(async()=>(await fetch(url+'/health')).ok&&(await fetch(transferUrl+'/health')).ok,'fixture APIs ready');
+ launch('card-proposals',['python3','-m','price.worker','--db',db]);
+ launch('chrome',['/usr/bin/google-chrome','--headless=new','--disable-background-networking','--disable-dev-shm-usage','--no-first-run','--no-default-browser-check','--user-data-dir='+path.join(temp,'profile'),'--remote-debugging-address=127.0.0.1','--remote-debugging-port='+chromePort,'about:blank']);
+ await wait(async()=>(await fetch('http://127.0.0.1:'+chromePort+'/json/version')).ok,'Chrome ready');
+ const target=await(await fetch('http://127.0.0.1:'+chromePort+'/json/new?about:blank',{method:'PUT'})).json();
+ ws=new WebSocket(target.webSocketDebuggerUrl);await new Promise((resolve,reject)=>{ws.addEventListener('open',resolve,{once:true});ws.addEventListener('error',reject,{once:true});});
+ const pending=new Map(),errors=[];let seq=0;
+ ws.addEventListener('message',event=>{const m=JSON.parse(event.data);if(m.id){const p=pending.get(m.id);if(p){pending.delete(m.id);clearTimeout(p.timer);m.error?p.reject(Error(JSON.stringify(m.error))):p.resolve(m.result);}}else if(m.method==='Runtime.exceptionThrown')errors.push(m.params.exceptionDetails);});
+ cdp=(method,params={})=>new Promise((resolve,reject)=>{const id=++seq,timer=setTimeout(()=>{pending.delete(id);reject(Error('CDP timeout '+method));},15000);pending.set(id,{resolve,reject,timer});ws.send(JSON.stringify({id,method,params}));});
+ evaluate=async expression=>{const r=await cdp('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true});if(r.exceptionDetails)throw Error(r.exceptionDetails.exception?.description||r.exceptionDetails.text);return r.result.value;};
+ const click=async selector=>{await wait(()=>evaluate('!!document.querySelector('+q(selector)+')'),'element '+selector);const point=await evaluate(`(()=>{let e=document.querySelector(${q(selector)});e.scrollIntoView({block:'center'});let r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2};})()`);await cdp('Input.dispatchMouseEvent',{type:'mousePressed',button:'left',clickCount:1,...point});await cdp('Input.dispatchMouseEvent',{type:'mouseReleased',button:'left',clickCount:1,...point});};
+ const fill=(selector,value)=>evaluate(`(()=>{let e=document.querySelector(${q(selector)});e.value=${q(value)};e.dispatchEvent(new Event('input',{bubbles:true}));})()`);
+ const screen=async name=>{const r=await cdp('Page.captureScreenshot',{format:'png',captureBeyondViewport:false});fs.writeFileSync(path.join(out,name),Buffer.from(r.data,'base64'));report.screenshots.push('evidence/version-loop/cashflow-browser/'+name);};
+ const fetchApi=(company,suffix)=>evaluate(`fetch('/api/companies/'+${q(company)}+${q(suffix)},{credentials:'same-origin'}).then(async r=>{if(!r.ok)throw Error('API '+r.status);return r.json();})`);
+ const login=async(base,username)=>{
+   await cdp('Page.navigate',{url:base+'/'});await wait(()=>evaluate('location.href==='+q(base+'/')+' && !!document.querySelector("#owner-login-form")'),'owner login loaded');
+   await evaluate(`(async()=>{const r=await fetch('/api/session');if(r.ok){let s=await r.json();await fetch('/api/logout',{method:'POST',headers:{'content-type':'application/json','x-csrf-token':s.csrf},body:'{}'});}location.reload();})()`);
+   await wait(()=>evaluate('!!document.querySelector("#owner-login-form") && !document.querySelector("#owner-login").hidden'),'logged-out login');
+   await fill('#owner-login-form [name=username]',username);await fill('#owner-login-form [name=password]','Test-Only-Price-2026!');await click('#owner-login-form button');
+   await wait(()=>evaluate('!document.querySelector("#owner-workspace").hidden && !!document.querySelector("#owner-company").value'),'user logged in');
+ };
+ const workbench=async base=>{await cdp('Page.navigate',{url:base+'/cashflow'});await wait(()=>evaluate('location.pathname==="/cashflow" && document.querySelector("#cash-user")?.textContent.includes("접속 사용자")'),'cash workbench loaded');await wait(()=>evaluate('!!document.querySelector("[data-plan]")'),'plan list');};
+ const planButton=async(id,label)=>{await wait(()=>evaluate(`(()=>{const b=[...document.querySelectorAll('[data-plan="${id}"] button')].find(e=>e.textContent===${q(label)});if(b){b.id='cash-selected-action';return true;}return false;})()`),'button '+label);await click('#cash-selected-action');await evaluate('document.getElementById("cash-selected-action")?.removeAttribute("id")');};
+ const approve=async(id)=>{await planButton(id,'독립 검토');await wait(()=>evaluate('document.querySelector("#cash-dialog").open'),'review dialog');await wait(()=>evaluate('document.querySelector("#cash-detail pre") || document.querySelector("#cash-dialog-error").textContent'),'original loaded');check('source detail loaded without runtime error '+id,await evaluate('!document.querySelector("#cash-dialog-error").textContent && !!document.querySelector("#cash-detail pre")'));await click('#cash-review-form [name=verified]');await fill('#cash-review-form [name=reason]','SYNTHETIC INDEPENDENT SOURCE REVIEW');await click('#cash-review-form button');await wait(()=>evaluate('!document.querySelector("#cash-dialog").open'),'independent review saved');};
+ await cdp('Runtime.enable');await cdp('Page.enable');await cdp('DOM.enable');await cdp('Emulation.setDeviceMetricsOverride',{width:1440,height:1000,deviceScaleFactor:1,mobile:false});
+ await login(url,'cash-card-owner');await workbench(url);
+ check('owner is not offered self-review buttons',await evaluate('![...document.querySelectorAll("#card-work button")].some(e=>e.textContent==="독립 검토")'));
+ await login(url,'cash-card-reviewer');await workbench(url);
+ await approve(fixture.card_plan);await planButton(fixture.card_plan,'장부 반영');
+ await wait(async()=>(await fetchApi(fixture.card_company,'/owner/card-books')).items.some(p=>p.id===fixture.card_plan&&p.state==='POSTED'),'charge recorded');check('card purchase settlement posts without duplicating expense');
+ await wait(async()=>(await fetchApi(fixture.card_company,'/owner/card-books')).items.some(p=>p.operation==='billing'),'proposal worker discovers actual card bill');
+ const bill=(await fetchApi(fixture.card_company,'/owner/card-books')).items.find(p=>p.operation==='billing');await click('#cash-refresh');await approve(bill.id);await planButton(bill.id,'장부 반영');
+ await wait(async()=>(await fetchApi(fixture.card_company,'/owner/card-books')).items.some(p=>p.id===bill.id&&p.state==='POSTED'),'bill recorded');
+ const reportCard=await fetchApi(fixture.card_company,'/owner/financial-statements?start=2026-09-01&end=2026-09-30');
+ check('three documents retain one expense and one bank payment',reportCard.income_statement.expenses===1000&&reportCard.cash.paid===1100&&reportCard.cash.received===0);
+ check('card debt is zero after matched payment',(await fetchApi(fixture.card_company,'/owner/card-books')).balances['1111222233334444']===0);
+ await screen('card-workbench-desktop.png');
+ await login(url,'cash-card-owner');await click('[data-view=results]');await wait(()=>evaluate('!!document.querySelector("#owner-card-report")'),'owner card result');
+ check('owner sees card result without choosing tax treatment',await evaluate('document.querySelector("#owner-card-report").textContent.includes("카드") && !document.querySelector("#view-results [name=deductible]")'));
+ await screen('owner-card-result.png');
+ await cdp('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});check('owner cash results fit mobile viewport',await evaluate('document.documentElement.scrollWidth<=innerWidth+1'));await screen('owner-card-mobile.png');
+ await cdp('Emulation.setDeviceMetricsOverride',{width:1440,height:1000,deviceScaleFactor:1,mobile:false});
+ await login(transferUrl,'cash-transfer-reviewer');await workbench(transferUrl);await approve(fixture.transfer_plan);await planButton(fixture.transfer_plan,'장부 반영');
+ await wait(async()=>(await fetchApi(fixture.transfer_company,'/owner/internal-transfers')).items[0].state==='POSTED','two transfer legs posted');
+ const transfer=await fetchApi(fixture.transfer_company,'/owner/financial-statements?start=2026-09-01&end=2026-09-30');
+ check('own-account transfer is not external cash flow or income',transfer.cash.received===0&&transfer.cash.paid===0&&transfer.cash.internal_transfers.received===1000&&transfer.income_statement.income===0&&transfer.income_statement.expenses===0);
+ const summary=await fetchApi(fixture.transfer_company,'/owner/internal-transfers');check('both legs are present and no bank transfer executed',summary.items[0].journal_ids.length===2&&summary.items[0].bank_transfer_initiated===false);
+ await screen('transfer-workbench-desktop.png');
+ await login(transferUrl,'cash-transfer-owner');await click('[data-view=results]');await wait(()=>evaluate('!!document.querySelector("#owner-transfer-report")'),'owner transfer report');await screen('owner-transfer-result.png');
+ check('unverified opening balance not shown as known zero',transfer.cash.closing===null);
+ check('no browser JavaScript exceptions',errors.length===0);report.status='PASS';
+}catch(error){report.status='FAIL';report.error=String(error.message||error);if(evaluate){try{report.page_text=String(await evaluate('document.body.innerText')).slice(0,4000);}catch{}}process.exitCode=1;
+}finally{if(ws)ws.close();for(const child of processes.reverse()){if(child.exitCode===null&&child.signalCode===null)child.kill('SIGTERM');}await pause(800);report.own_processes_stopped=processes.every(p=>p.exitCode!==null||p.signalCode!==null);report.finished_at=new Date().toISOString();fs.writeFileSync(path.join(out,'report.json'),JSON.stringify(report,null,2));console.log(JSON.stringify({status:report.status,checks:report.checks.length,error:report.error,report:'evidence/version-loop/cashflow-browser/report.json',screenshots:report.screenshots}));}

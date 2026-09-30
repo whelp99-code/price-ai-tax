@@ -1,0 +1,1 @@
+{"schema":"price.worker/1","name":"price","project":"price","product":"AI 세무사","command":["python3","-m","price.worker"],"workingDirectory":".","databaseEnvironment":"PRICE_DB","capabilities":["assess_transaction","draft_journal","request_facts"],"prohibited":["approve","post_journal","live_submit","payment","shell"],"registrationStatus":"manifest_only_not_registered_in_Orca"}

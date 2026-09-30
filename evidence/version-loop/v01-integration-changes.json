@@ -1,0 +1,36 @@
+{
+  "files": [
+    {
+      "path": "price/api.py",
+      "before_sha256": "d74ae672b1080311d888f102e2ae20219b524021663e6df0071420dcb98174b5",
+      "after_sha256": "799f45c288bb2473511c4541380b9adde6c96aa8eae200b0a57ff37233da6608"
+    },
+    {
+      "path": "price/worker.py",
+      "before_sha256": "0919253785044dbcc6adfe68d811e3532bad5352fedeb6f8262256dfa258cb0c",
+      "after_sha256": "3560992a15459b6b58fd9ab71b5ecdedd17f48801f3fba9a61313a44c3a3ec83"
+    },
+    {
+      "path": "price/owner.py",
+      "before_sha256": "af7b2030bd73dd0b89718f84165c686ce9203a59a2796ae92823043c119167b1",
+      "after_sha256": "8b64e5250206285d4e5c474d841db8a2894f38b68e970b414e48597cd8b13582"
+    },
+    {
+      "path": "price/static/owner.js",
+      "before_sha256": "b94c65f0883dc92e9cd7cee4aefbe8d2308f77f91126f6c9287fe8a50d3cc012",
+      "after_sha256": "697909086ea9c077108996395bc00cd3bfc959ae44a2a6c662967bf088cc1efd"
+    },
+    {
+      "path": "price/source_tables.py",
+      "before_sha256": "f2e49a00fb405b2ae3696148b0d1bb60f2cddfe9f861de011cc2e5ab90d62c51",
+      "after_sha256": "683379a6aa064ea246dab2eaaaabada2c48c5a6354230863efb8b3c9270fc45f"
+    },
+    {
+      "path": "tests/test_source_ingestion.py",
+      "before_sha256": "7f3ba36bfc03d6780b8a87061116b56adbe1d3ff3da9184443c3256af33146da",
+      "after_sha256": "ff7b7a5e1e4641d36ad59d9366d0ed6dac116a4e8879aec2727697c95d371ee9"
+    }
+  ],
+  "approval_checks_removed": false,
+  "live_actions_enabled": false
+}

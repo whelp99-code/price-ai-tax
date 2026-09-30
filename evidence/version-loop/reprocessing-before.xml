@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="6" skipped="0" tests="12" time="0.580" timestamp="2026-09-28T22:25:00.720279+09:00" hostname="jm-acloud"><testcase classname="tests.test_extraction_revisions" name="test_reprocess_retains_prior_generation_and_rebuilds_without_collision" time="0.402"><failure message="assert 2 == 0">w = World(db=&lt;price.db.Database object at 0x766aa2fe7390&gt;, svc=&lt;price.service.Service object at 0x766aa2fe74d0&gt;, company='...7cfafe9f62f8749', username='other-owner', csrf='', worker=False), evidence='evidence_8b68ceb27b1e4ba98c189447732f72f7')
+
+    def test_reprocess_retains_prior_generation_and_rebuilds_without_collision(w):
+        reader,doc=ready(w);service=Extractions(w.svc)
+        original=w.svc.evidence_content(w.owner,w.company,doc['blob_id'])['content']
+        old=reader.records(w.owner,w.company,doc['id'])['rows']
+        queued=service.reprocess(w.owner,w.company,doc['id'],request(doc))
+        assert queued['generation']==2 and queued['state']=='QUEUED'
+&gt;       assert reader.records(w.owner,w.company,doc['id'])['total']==0
+E       assert 2 == 0
+
+tests/test_extraction_revisions.py:26: AssertionError</failure></testcase><testcase classname="tests.test_extraction_revisions" name="test_reprocess_key_is_idempotent_and_payload_bound" time="0.009" /><testcase classname="tests.test_extraction_revisions" name="test_stale_revision_cannot_retire_current_sources" time="0.008" /><testcase classname="tests.test_extraction_revisions" name="test_reprocess_is_company_writer_scoped[viewer]" time="0.008" /><testcase classname="tests.test_extraction_revisions" name="test_reprocess_is_company_writer_scoped[other_owner]" time="0.008" /><testcase classname="tests.test_extraction_revisions" name="test_inflight_reader_cannot_be_replaced" time="0.010"><failure message="sqlite3.IntegrityError: UNIQUE constraint failed: objects.company_id, objects.kind, objects.id">w = World(db=&lt;price.db.Database object at 0x766aa2d7c270&gt;, svc=&lt;price.service.Service object at 0x766aa2d7c380&gt;, company='...7cfafe9f62f8749', username='other-owner', csrf='', worker=False), evidence='evidence_f0126563ed794283adfe83d3a624cc45')
+
+    def test_inflight_reader_cannot_be_replaced(w):
+        reader,doc=ready(w);service=Extractions(w.svc)
+        service.reprocess(w.owner,w.company,doc['id'],request(doc))
+        job=reader.claim(w.company)
+        current=reader.uploads.document(w.owner,w.company,doc['id'])
+        with pytest.raises(DomainError) as error:
+            service.reprocess(w.owner,w.company,doc['id'],request(current,key='reprocess-case-02'))
+        assert error.value.code=='REPROCESS_BUSY'
+        from price.source_tables import parse_source_table
+&gt;       assert reader.finish(job,parse_source_table(BANK))['committed']
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_extraction_revisions.py:79: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+price/ingestion.py:64: in finish
+    self.db.create(c, job['company_id'], 'source_record', body, ident=ident)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;price.db.Database object at 0x766aa2d7c270&gt;
+c = &lt;sqlite3.Connection object at 0x766aa2ef54e0&gt;
+company = 'company_1498bff2795d4a2f83c9ce95bbf3a81d', kind = 'source_record'
+data = {'context_pending': ['company_ownership', 'accounting_treatment'], 'document_id': 'document_bfb893930ff24148b479c83f1e...일시', 'raw': '2026-09-01 10:00:00', 'row': 5}, 'debit': {'column': 4, 'header': '출금액', 'raw': '0', 'row': 5}, ...}, ...}
+ident = 'source_f3b490e4dc31a0eca4b31d2afbdbea4a374ef5f0b40f9f0a97b4961aa668f4c7'
+
+    def create(self, c, company: str, kind: str, data: dict, ident: str | None = None) -&gt; dict:
+        ident, ts = ident or uid(kind), now()
+&gt;       c.execute("INSERT INTO objects VALUES(?,?,?,?,?,?,?)", (company, kind, ident, 1, canonical(payload(data)), ts, ts))
+E       sqlite3.IntegrityError: UNIQUE constraint failed: objects.company_id, objects.kind, objects.id
+
+price/db.py:97: IntegrityError</failure></testcase><testcase classname="tests.test_extraction_revisions" name="test_corrected_company_facts_can_recover_held_source" time="0.012"><failure message="sqlite3.IntegrityError: UNIQUE constraint failed: objects.company_id, objects.kind, objects.id">w = World(db=&lt;price.db.Database object at 0x766aa2d7c9e0&gt;, svc=&lt;price.service.Service object at 0x766aa2d7caf0&gt;, company='...7cfafe9f62f8749', username='other-owner', csrf='', worker=False), evidence='evidence_02c388234aad484098ab5de515c024b7')
+
+    def test_corrected_company_facts_can_recover_held_source(w):
+        reader,doc=ready(w);owner=OwnerView(w.svc,reader.uploads)
+        first=owner.confirm(w.owner,w.company,CompanyFactsInput(expected_revision=0,name='시험 회사 A',mode='company',confirmed=True,instruments=[{'kind':'bank','identifier':'999999999999'}]))
+        owner.confirm(w.owner,w.company,CompanyFactsInput(expected_revision=first['revision'],name='시험 회사 A',mode='company',confirmed=True,instruments=[{'kind':'bank','identifier':'123456789012'}]))
+        held=reader.uploads.document(w.owner,w.company,doc['id'])
+        Extractions(w.svc).reprocess(w.owner,w.company,doc['id'],request(held))
+&gt;       assert reader.run_once(w.company)['state']=='SUCCEEDED'
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_extraction_revisions.py:88: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+price/ingestion.py:109: in run_once
+    return self.finish(job, result)
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+price/ingestion.py:64: in finish
+    self.db.create(c, job['company_id'], 'source_record', body, ident=ident)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;price.db.Database object at 0x766aa2d7c9e0&gt;
+c = &lt;sqlite3.Connection object at 0x766aa2ef6110&gt;
+company = 'company_1498bff2795d4a2f83c9ce95bbf3a81d', kind = 'source_record'
+data = {'context_pending': ['company_ownership', 'accounting_treatment'], 'document_id': 'document_7f2ccb5952c54ca6923ca6cfbd...일시', 'raw': '2026-09-01 10:00:00', 'row': 5}, 'debit': {'column': 4, 'header': '출금액', 'raw': '0', 'row': 5}, ...}, ...}
+ident = 'source_2459f7ba7ec5e2e9d5786fde67052b33ce12f066224efbc34d64e7a388e6bd03'
+
+    def create(self, c, company: str, kind: str, data: dict, ident: str | None = None) -&gt; dict:
+        ident, ts = ident or uid(kind), now()
+&gt;       c.execute("INSERT INTO objects VALUES(?,?,?,?,?,?,?)", (company, kind, ident, 1, canonical(payload(data)), ts, ts))
+E       sqlite3.IntegrityError: UNIQUE constraint failed: objects.company_id, objects.kind, objects.id
+
+price/db.py:97: IntegrityError</failure></testcase><testcase classname="tests.test_extraction_revisions" name="test_failed_retry_does_not_expose_old_results_as_current" time="0.010"><failure message="assert 2 == 0">w = World(db=&lt;price.db.Database object at 0x766aa2efdc50&gt;, svc=&lt;price.service.Service object at 0x766aa2efdd50&gt;, company='...7cfafe9f62f8749', username='other-owner', csrf='', worker=False), evidence='evidence_e7a10cc21f104084a07bef52932bb6f7')
+monkeypatch = &lt;_pytest.monkeypatch.MonkeyPatch object at 0x766aa2f3eb10&gt;
+
+    def test_failed_retry_does_not_expose_old_results_as_current(w,monkeypatch):
+        reader,doc=ready(w);service=Extractions(w.svc);service.reprocess(w.owner,w.company,doc['id'],request(doc))
+        monkeypatch.setattr('price.ingestion.parse_text_document',lambda raw: {'state':'READ_FAILED','records':[],'issues':[{'code':'READER_FAILED'}]})
+        assert reader.run_once(w.company)['state']=='BLOCKED'
+&gt;       assert reader.records(w.owner,w.company,doc['id'])['total']==0
+E       assert 2 == 0
+
+tests/test_extraction_revisions.py:96: AssertionError</failure></testcase><testcase classname="tests.test_extraction_revisions" name="test_changed_parser_outputs_create_field_diff_and_impact" time="0.011"><failure message="assert False&#10; +  where False = any(&lt;generator object test_changed_parser_outputs_create_field_diff_and_impact.&lt;locals&gt;.&lt;genexpr&gt; at 0x766aa2ea2a80&gt;)">w = World(db=&lt;price.db.Database object at 0x766aa2efe650&gt;, svc=&lt;price.service.Service object at 0x766aa2efe750&gt;, company='...7cfafe9f62f8749', username='other-owner', csrf='', worker=False), evidence='evidence_daf5ef3739e846f5bf99ff0caf4f34fc')
+monkeypatch = &lt;_pytest.monkeypatch.MonkeyPatch object at 0x766aa2f3efd0&gt;
+
+    def test_changed_parser_outputs_create_field_diff_and_impact(w,monkeypatch):
+        from price.source_tables import parse_source_table
+        reader,doc=ready(w);service=Extractions(w.svc)
+        service.reprocess(w.owner,w.company,doc['id'],request(doc))
+        result=parse_source_table(BANK)
+        result['records'][0]['values']['description']='파서가 다시 읽은 다른 설명'
+        result['parser_version']='synthetic-test-reader/2'
+        monkeypatch.setattr('price.ingestion.parse_text_document',lambda raw: result)
+        assert reader.run_once(w.company)['state']=='SUCCEEDED'
+        latest=service.history(w.owner,w.company,doc['id'])['runs'][-1]
+&gt;       assert any(x['field']=='description' for x in latest['value_changes'])
+E       assert False
+E        +  where False = any(&lt;generator object test_changed_parser_outputs_create_field_diff_and_impact.&lt;locals&gt;.&lt;genexpr&gt; at 0x766aa2ea2a80&gt;)
+
+tests/test_extraction_revisions.py:110: AssertionError</failure></testcase><testcase classname="tests.test_extraction_revisions" name="test_posted_original_cannot_be_changed_by_reprocessing" time="0.013"><failure message="sqlite3.IntegrityError: UNIQUE constraint failed: objects.company_id, objects.kind, objects.id">w = World(db=&lt;price.db.Database object at 0x766aa2dc8f50&gt;, svc=&lt;price.service.Service object at 0x766aa2dc9130&gt;, company='...7cfafe9f62f8749', username='other-owner', csrf='', worker=False), evidence='evidence_6b90dbd7b2704ef39a588819a6d1ea4b')
+
+    def test_posted_original_cannot_be_changed_by_reprocessing(w):
+        reader,doc=ready(w)
+        posted=w.post(w.tx(evidence_ids=[doc['blob_id']]))
+        service=Extractions(w.svc);service.reprocess(w.owner,w.company,doc['id'],request(doc))
+&gt;       reader.run_once(w.company)
+
+tests/test_extraction_revisions.py:120: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+price/ingestion.py:109: in run_once
+    return self.finish(job, result)
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+price/ingestion.py:64: in finish
+    self.db.create(c, job['company_id'], 'source_record', body, ident=ident)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;price.db.Database object at 0x766aa2dc8f50&gt;
+c = &lt;sqlite3.Connection object at 0x766aa2dc93f0&gt;
+company = 'company_1498bff2795d4a2f83c9ce95bbf3a81d', kind = 'source_record'
+data = {'context_pending': ['company_ownership', 'accounting_treatment'], 'document_id': 'document_bee159de9d994e1e8e3b65f230...일시', 'raw': '2026-09-01 10:00:00', 'row': 5}, 'debit': {'column': 4, 'header': '출금액', 'raw': '0', 'row': 5}, ...}, ...}
+ident = 'source_0aaa4fd8c2e2774996aebeac9a1ac99170e6a26bce4f1a6d78ebf6b6ccb7853b'
+
+    def create(self, c, company: str, kind: str, data: dict, ident: str | None = None) -&gt; dict:
+        ident, ts = ident or uid(kind), now()
+&gt;       c.execute("INSERT INTO objects VALUES(?,?,?,?,?,?,?)", (company, kind, ident, 1, canonical(payload(data)), ts, ts))
+E       sqlite3.IntegrityError: UNIQUE constraint failed: objects.company_id, objects.kind, objects.id
+
+price/db.py:97: IntegrityError</failure></testcase><testcase classname="tests.test_extraction_revisions" name="test_history_and_coverage_require_same_company" time="0.008" /><testcase classname="tests.test_extraction_revisions" name="test_quarantined_file_never_reprocessed_as_safe" time="0.006" /></testsuite></testsuites>

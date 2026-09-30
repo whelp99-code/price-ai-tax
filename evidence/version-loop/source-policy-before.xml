@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="2" skipped="0" tests="4" time="0.515" timestamp="2026-09-28T22:52:51.810424+09:00" hostname="jm-acloud"><testcase classname="tests.test_source_policy_invalidation" name="test_reprocessing_immediately_invalidates_existing_policy_authority" time="0.424" /><testcase classname="tests.test_source_policy_invalidation" name="test_replay_after_posting_creates_impact_preserves_exact_posted_record" time="0.032" /><testcase classname="tests.test_source_policy_invalidation" name="test_positive_xml_amendment_without_prior_reference_is_not_normal_purchase" time="0.009"><failure message="AssertionError: assert 'CORRECTION_REVIEW' in []">w = World(db=&lt;price.db.Database object at 0x7e32f5925940&gt;, svc=&lt;price.service.Service object at 0x7e32f5925a70&gt;, company='...f3c4518e1477d81', username='other-owner', csrf='', worker=False), evidence='evidence_b57da9470d88474492492bca978556ac')
+
+    def test_positive_xml_amendment_without_prior_reference_is_not_normal_purchase(w):
+        reader=Ingestion(w.svc)
+        OwnerView(w.svc,reader.uploads).confirm(w.owner,w.company,CompanyFactsInput(expected_revision=0,name='시험 회사 A',business_number='2222222222',mode='company',confirmed=True))
+        raw=invoice_xml(extra='&lt;AmendmentStatusCode&gt;01&lt;/AmendmentStatusCode&gt;',currency=' currencyID="KRW"')
+        upload(w,raw,filename='수정세금계산서.xml')
+        assert reader.run_once(w.company)['state']=='SUCCEEDED'
+        work=Casework(w.svc);work.refresh(w.owner,w.company)
+        event=work.list(w.owner,w.company)[0]
+&gt;       assert 'CORRECTION_REVIEW' in event['issues']
+E       AssertionError: assert 'CORRECTION_REVIEW' in []
+
+tests/test_source_policy_invalidation.py:50: AssertionError</failure></testcase><testcase classname="tests.test_source_policy_invalidation" name="test_unverified_xml_signature_is_not_erased_by_economic_event" time="0.009"><failure message="AssertionError: assert None is False&#10; +  where None = &lt;built-in method get of dict object at 0x7e32f57bab00&gt;('source_signature_verified')&#10; +    where &lt;built-in method get of dict object at 0x7e32f57bab00&gt; = {'accounting_complete': False, 'algorithm_version': 'source-casework/1', 'context_hash': '5943a510b4088876133e15f3cf26728f1474ff721e375e9f4908255dec7d7a22', 'counterparty_id': '1111111111', ...}.get">w = World(db=&lt;price.db.Database object at 0x7e32f5926190&gt;, svc=&lt;price.service.Service object at 0x7e32f59262c0&gt;, company='...f3c4518e1477d81', username='other-owner', csrf='', worker=False), evidence='evidence_12945754e4f846618190c11839a47b58')
+
+    def test_unverified_xml_signature_is_not_erased_by_economic_event(w):
+        reader=Ingestion(w.svc)
+        OwnerView(w.svc,reader.uploads).confirm(w.owner,w.company,CompanyFactsInput(expected_revision=0,name='시험 회사 A',business_number='2222222222',mode='company',confirmed=True))
+        upload(w,invoice_xml(currency=' currencyID="KRW"'),filename='세금계산서.xml')
+        reader.run_once(w.company)
+        work=Casework(w.svc);work.refresh(w.owner,w.company)
+        event=work.list(w.owner,w.company)[0]
+&gt;       assert event.get('source_signature_verified') is False
+E       AssertionError: assert None is False
+E        +  where None = &lt;built-in method get of dict object at 0x7e32f57bab00&gt;('source_signature_verified')
+E        +    where &lt;built-in method get of dict object at 0x7e32f57bab00&gt; = {'accounting_complete': False, 'algorithm_version': 'source-casework/1', 'context_hash': '5943a510b4088876133e15f3cf26728f1474ff721e375e9f4908255dec7d7a22', 'counterparty_id': '1111111111', ...}.get
+
+tests/test_source_policy_invalidation.py:62: AssertionError</failure></testcase></testsuite></testsuites>

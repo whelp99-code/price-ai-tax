@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="7" skipped="0" tests="7" time="0.490" timestamp="2026-09-28T22:56:54.262768+09:00" hostname="jm-acloud"><testcase classname="tests.test_extraction_history_limits" name="test_history_is_paginated_without_repeating_entire_source_values" time="0.405"><failure message="TypeError: Extractions.history() got an unexpected keyword argument 'offset'">w = World(db=&lt;price.db.Database object at 0x7b35342fee90&gt;, svc=&lt;price.service.Service object at 0x7b35342fefd0&gt;, company='...e0636d58b7bf4d9', username='other-owner', csrf='', worker=False), evidence='evidence_fcce0f72ad7d4793929ce251292fa0c5')
+
+    def test_history_is_paginated_without_repeating_entire_source_values(w):
+        reader,doc=ready(w);history=Extractions(w.svc)
+        for index in range(2):
+            current=reader.uploads.document(w.owner,w.company,doc['id'])
+            history.reprocess(w.owner,w.company,doc['id'],ReprocessInput(expected_revision=current['revision'],idempotency_key='history-replay-'+str(index),reason='변경 이력 시험'))
+            reader.run_once(w.company)
+&gt;       first=history.history(w.owner,w.company,doc['id'],offset=0,limit=2)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       TypeError: Extractions.history() got an unexpected keyword argument 'offset'
+
+tests/test_extraction_history_limits.py:14: TypeError</failure></testcase><testcase classname="tests.test_extraction_history_limits" name="test_history_rejects_unbounded_or_noninteger_pages[-1-10]" time="0.008"><failure message="TypeError: Extractions.history() got an unexpected keyword argument 'offset'">w = World(db=&lt;price.db.Database object at 0x7b35342ffc50&gt;, svc=&lt;price.service.Service object at 0x7b35342ffd90&gt;, company='...e0636d58b7bf4d9', username='other-owner', csrf='', worker=False), evidence='evidence_e0c76f2c7a034c15818501194e65561d')
+offset = -1, limit = 10
+
+    @pytest.mark.parametrize('offset,limit',[(-1,10),(0,0),(0,101),(True,10),(0,True),(0,1.5)])
+    def test_history_rejects_unbounded_or_noninteger_pages(w,offset,limit):
+        reader,doc=ready(w)
+&gt;       with pytest.raises(DomainError):Extractions(w.svc).history(w.owner,w.company,doc['id'],offset=offset,limit=limit)
+                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       TypeError: Extractions.history() got an unexpected keyword argument 'offset'
+
+tests/test_extraction_history_limits.py:26: TypeError</failure></testcase><testcase classname="tests.test_extraction_history_limits" name="test_history_rejects_unbounded_or_noninteger_pages[0-0]" time="0.007"><failure message="TypeError: Extractions.history() got an unexpected keyword argument 'offset'">w = World(db=&lt;price.db.Database object at 0x7b35341e1350&gt;, svc=&lt;price.service.Service object at 0x7b35341e1480&gt;, company='...e0636d58b7bf4d9', username='other-owner', csrf='', worker=False), evidence='evidence_239aa0ad053d4205a2c74bfe42c39ac6')
+offset = 0, limit = 0
+
+    @pytest.mark.parametrize('offset,limit',[(-1,10),(0,0),(0,101),(True,10),(0,True),(0,1.5)])
+    def test_history_rejects_unbounded_or_noninteger_pages(w,offset,limit):
+        reader,doc=ready(w)
+&gt;       with pytest.raises(DomainError):Extractions(w.svc).history(w.owner,w.company,doc['id'],offset=offset,limit=limit)
+                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       TypeError: Extractions.history() got an unexpected keyword argument 'offset'
+
+tests/test_extraction_history_limits.py:26: TypeError</failure></testcase><testcase classname="tests.test_extraction_history_limits" name="test_history_rejects_unbounded_or_noninteger_pages[0-101]" time="0.007"><failure message="TypeError: Extractions.history() got an unexpected keyword argument 'offset'">w = World(db=&lt;price.db.Database object at 0x7b35341e1cd0&gt;, svc=&lt;price.service.Service object at 0x7b35341e1e00&gt;, company='...e0636d58b7bf4d9', username='other-owner', csrf='', worker=False), evidence='evidence_44a88274cfd3445e931f0b4bbaf93088')
+offset = 0, limit = 101
+
+    @pytest.mark.parametrize('offset,limit',[(-1,10),(0,0),(0,101),(True,10),(0,True),(0,1.5)])
+    def test_history_rejects_unbounded_or_noninteger_pages(w,offset,limit):
+        reader,doc=ready(w)
+&gt;       with pytest.raises(DomainError):Extractions(w.svc).history(w.owner,w.company,doc['id'],offset=offset,limit=limit)
+                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       TypeError: Extractions.history() got an unexpected keyword argument 'offset'
+
+tests/test_extraction_history_limits.py:26: TypeError</failure></testcase><testcase classname="tests.test_extraction_history_limits" name="test_history_rejects_unbounded_or_noninteger_pages[True-10]" time="0.007"><failure message="TypeError: Extractions.history() got an unexpected keyword argument 'offset'">w = World(db=&lt;price.db.Database object at 0x7b353405d370&gt;, svc=&lt;price.service.Service object at 0x7b353405d490&gt;, company='...e0636d58b7bf4d9', username='other-owner', csrf='', worker=False), evidence='evidence_6ac2b06d3ab14a6797ba3a48e7f64f37')
+offset = True, limit = 10
+
+    @pytest.mark.parametrize('offset,limit',[(-1,10),(0,0),(0,101),(True,10),(0,True),(0,1.5)])
+    def test_history_rejects_unbounded_or_noninteger_pages(w,offset,limit):
+        reader,doc=ready(w)
+&gt;       with pytest.raises(DomainError):Extractions(w.svc).history(w.owner,w.company,doc['id'],offset=offset,limit=limit)
+                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       TypeError: Extractions.history() got an unexpected keyword argument 'offset'
+
+tests/test_extraction_history_limits.py:26: TypeError</failure></testcase><testcase classname="tests.test_extraction_history_limits" name="test_history_rejects_unbounded_or_noninteger_pages[0-True]" time="0.008"><failure message="TypeError: Extractions.history() got an unexpected keyword argument 'offset'">w = World(db=&lt;price.db.Database object at 0x7b353423cd10&gt;, svc=&lt;price.service.Service object at 0x7b353423ce20&gt;, company='...e0636d58b7bf4d9', username='other-owner', csrf='', worker=False), evidence='evidence_043a48ecaf30466c88075f75fe1f177a')
+offset = 0, limit = True
+
+    @pytest.mark.parametrize('offset,limit',[(-1,10),(0,0),(0,101),(True,10),(0,True),(0,1.5)])
+    def test_history_rejects_unbounded_or_noninteger_pages(w,offset,limit):
+        reader,doc=ready(w)
+&gt;       with pytest.raises(DomainError):Extractions(w.svc).history(w.owner,w.company,doc['id'],offset=offset,limit=limit)
+                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       TypeError: Extractions.history() got an unexpected keyword argument 'offset'
+
+tests/test_extraction_history_limits.py:26: TypeError</failure></testcase><testcase classname="tests.test_extraction_history_limits" name="test_history_rejects_unbounded_or_noninteger_pages[0-1.5]" time="0.007"><failure message="TypeError: Extractions.history() got an unexpected keyword argument 'offset'">w = World(db=&lt;price.db.Database object at 0x7b353423d260&gt;, svc=&lt;price.service.Service object at 0x7b353423d370&gt;, company='...e0636d58b7bf4d9', username='other-owner', csrf='', worker=False), evidence='evidence_f60b3bac5ac34ecea8708358d5f86e26')
+offset = 0, limit = 1.5
+
+    @pytest.mark.parametrize('offset,limit',[(-1,10),(0,0),(0,101),(True,10),(0,True),(0,1.5)])
+    def test_history_rejects_unbounded_or_noninteger_pages(w,offset,limit):
+        reader,doc=ready(w)
+&gt;       with pytest.raises(DomainError):Extractions(w.svc).history(w.owner,w.company,doc['id'],offset=offset,limit=limit)
+                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       TypeError: Extractions.history() got an unexpected keyword argument 'offset'
+
+tests/test_extraction_history_limits.py:26: TypeError</failure></testcase></testsuite></testsuites>
