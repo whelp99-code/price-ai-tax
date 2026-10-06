@@ -12,15 +12,25 @@ from .review_cases import ReviewCases,ReviewRequest,ReviewAssignment,ReviewFindi
 from .submission_gateway import SubmissionGateway,PackageInput,PackageRevision
 from .release_readiness import ReleaseReadiness
 from .pipeline_health import PipelineHealth
+from .discrepancies import Discrepancies
 
 
 def register_operations_routes(app,service,actor_dependency):
     finance=FinanceOps(service);tax=TaxWorkpapers(service);reviews=ReviewCases(service)
     gateway=SubmissionGateway(service);release=ReleaseReadiness(service)
     pipeline=PipelineHealth(service)
+    discrepancies=Discrepancies(service)
     app.state.finance_ops=finance;app.state.tax_workpapers=tax;app.state.review_cases=reviews
     app.state.submission_gateway=gateway;app.state.release_readiness=release
     p='/api/companies/{company}'
+
+    @app.get(p+'/discrepancies')
+    def list_discrepancies(company:str,a:Actor=Depends(actor_dependency)):
+        return discrepancies.list(a,company)
+
+    @app.post(p+'/discrepancies/{ident}/invalidate')
+    def invalidate_discrepancy(company:str,ident:str,a:Actor=Depends(actor_dependency)):
+        return discrepancies.invalidate_changed_source(a,company,ident)
 
     @app.get(p+'/owner/reports')
     def owner_report(company:str,start:date,end:date,a:Actor=Depends(actor_dependency)):

@@ -21,8 +21,9 @@ async function request(path, options={}) {
   return result;
 }
 function post(path, data) { return request(prefix(path), {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify(data)}); }
-function showLogin() { state.controller?.abort(); state.csrf = ''; state.company = ''; $('#owner-workspace').hidden = true; $('#account-controls').hidden = true; $('#owner-login').hidden = false; }
+function showLogin() { state.controller?.abort(); discardDiscrepancySession(); state.csrf = ''; state.company = ''; $('#owner-workspace').hidden = true; $('#account-controls').hidden = true; $('#owner-login').hidden = false; }
 async function acceptSession(result) {
+  discardDiscrepancySession();
   state.csrf = result.csrf; state.companies = result.companies || [];
   const select = $('#owner-company'); select.replaceChildren();
   for (const company of state.companies) { const item = element('option', company.name); item.value = company.id; select.append(item); }
