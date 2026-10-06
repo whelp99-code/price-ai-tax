@@ -2,7 +2,11 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 import pytest
 from price.event_settlements import EventSettlements,SettlementInput
-from price.db import DomainError
+from price.auth import Actor
+from price.casework import Casework
+from price.db import Database, DomainError
+from price.models import UserInput
+from price.service import Service
 from price.ingestion import Ingestion
 from price.extractions import Extractions,ReprocessInput
 from test_casework import setup_sources,invoice
@@ -45,6 +49,62 @@ def test_equal_money_without_reference_never_auto_connected(w):
 def test_overpayment_without_split_information_remains_unallocated(w):
     setup_sources(w,number='1111111111',documents=[INVOICES,bank_rows([2200])]);links=EventSettlements(w.svc)
     assert links.reconcile_strong_references(w.owner,w.company)['new_links']==0
+
+
+def test_reopened_partial_conservation_and_unallocated_cash(w):
+    raw = bank_rows([400, 300, 200]).replace(b'BANK-2,222-22-22222,SYNTHETIC-01', b'BANK-2,222-22-22222,')
+    work = setup_sources(w, number='1111111111', documents=[INVOICES, raw])
+    events = work.list(w.owner, w.company)
+    inv = next(e for e in events if e['kind'] == 'invoice')
+    banks = {int(e['values']['gross']): e for e in events if e['kind'] == 'bank'}
+    links = EventSettlements(w.svc)
+    for amount in (400, 300):
+        links.allocate(w.reviewer, w.company, data_for(inv, banks[amount], amount, f'partial-cash-{amount}'))
+    svc = Service(Database(w.db.path))
+    report = EventSettlements(svc).report(w.owner, w.company)
+    assert isinstance(report['balances'], list)
+    balances = {b['event_id']: b for b in report['balances']}
+    assert (balances[inv['id']]['gross'], balances[inv['id']]['allocated'], balances[inv['id']]['remaining']) == (1100, 700, 400)
+    for amount in (400, 300, 200):
+        balance = balances[banks[amount]['id']]
+        assert (balance['gross'], balance['allocated'], balance['remaining']) == (amount, amount if amount != 200 else 0, 0 if amount != 200 else 200)
+    assert all(type(balance[key]) is int and balance['gross'] == balance['allocated'] + balance['remaining'] for balance in balances.values() for key in ('gross', 'allocated', 'remaining'))
+    for event in Casework(svc).list(w.owner, w.company):
+        if event['kind'] == 'bank':
+            assert event['facts'] == {} and event['facts_from_sources'] == []
+            assert event['state'] == 'NEEDS_FACTS' and [q['key'] for q in event['questions']] == ['cash_reason']
+    with svc.db.connect() as c:
+        assert not svc.db.list(c, w.company, 'journal')
+
+
+def test_reopened_settlement_replay_binds_payload_and_actor(w):
+    work = setup_sources(w, number='1111111111', documents=[INVOICES, bank_rows([700])])
+    events = work.list(w.owner, w.company)
+    inv = next(e for e in events if e['kind'] == 'invoice')
+    bank = next(e for e in events if e['kind'] == 'bank')
+    user = w.svc.add_user(w.owner, w.company, UserInput(username='second-reviewer', password='Test-Only-Price-2026!', role='reviewer'))
+    other = Actor(user['id'], user['username'])
+    data = data_for(inv, bank, 600, 'durable-settlement-01')
+    first = EventSettlements(w.svc).allocate(w.reviewer, w.company, data)
+    with w.db.connect() as c:
+        stored = w.db.list(c, w.company, 'event_settlement')
+        audit = w.db.verify_audit(c, w.company)
+    links = EventSettlements(Service(Database(w.db.path)))
+    replay = links.allocate(w.reviewer, w.company, data)
+    assert replay == {**first, 'reused': True}
+    for actor, changed in (
+        (w.reviewer, data.model_copy(update={'amount': 601})),
+        (w.reviewer, data.model_copy(update={'reason': 'changed reason'})),
+        (w.reviewer, data.model_copy(update={'payment_hash': '0' * 64})),
+        (other, data),
+    ):
+        with pytest.raises(DomainError) as error:
+            links.allocate(actor, w.company, changed)
+        assert error.value.code == 'SETTLEMENT_KEY_CONFLICT'
+    with links.db.connect() as c:
+        assert links.db.list(c, w.company, 'event_settlement') == stored
+        assert links.db.verify_audit(c, w.company) == audit and audit['valid']
+        assert not links.db.list(c, w.company, 'journal')
 
 
 def test_human_reviewed_allocation_checks_both_limits_and_idempotency(w):
