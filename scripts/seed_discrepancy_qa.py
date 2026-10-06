@@ -62,6 +62,15 @@ def main() -> None:
         event_id=changed_event["id"], reason="Changed marker", idempotency_key="qa-changed-marker01"))
     equal = reviews.open(owner, company, ReviewRequest(
         event_id=equal_event["id"], reason="Equal marker", idempotency_key="qa-equal-marker001"))
+    fact_event = next(
+        event for event in events
+        if event["kind"] in ("invoice", "card")
+        and event["direction"] == "purchase"
+        and event["id"] not in {changed_event["id"], equal_event["id"]}
+    )
+    fact_changed = reviews.open(owner, company, ReviewRequest(
+        event_id=fact_event["id"], reason="Fact marker", idempotency_key="qa-fact-marker001"))
+    casework.answer(work, world, fact_event, "business_use", "business", key="qa-fact-answer001")
     with db.transaction() as c:
         source = db.get(c, company, "source_record", changed_event["source_record_ids"][0])
         db.replace(c, company, "source_record", source["id"], {**source, "lifecycle": "SUPERSEDED"}, source["revision"])
@@ -93,6 +102,8 @@ def main() -> None:
         "other_company": other,
         "changed_review": changed["id"],
         "equal_review": equal["id"],
+        "fact_event": fact_event["id"],
+        "fact_changed_review": fact_changed["id"],
         "foreign_review": foreign_review["id"],
         "password": PASSWORD,
     }))

@@ -6,6 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from price.api import create_app
+from price.casework import Casework
 from price.db import DomainError
 from price.discrepancies import Discrepancies, freshness_of, krw, revision_text
 from price.review_cases import ReviewCases, ReviewRequest
@@ -133,13 +134,44 @@ def test_review_source_supersede_is_stale_without_refresh_writes(w):
 def test_review_fact_change_is_stale(w):
     work = setup_sources(w)
     event = invoice(work, w)
-    ReviewCases(w.svc).open(w.owner, w.company, ReviewRequest(
+    review = ReviewCases(w.svc).open(w.owner, w.company, ReviewRequest(
         event_id=event["id"], reason="Fact revision test", idempotency_key="f1-fact-revision"))
     answer(work, w, event, "business_use", "business")
     item = Discrepancies(w.svc).list(w.owner, w.company)["items"][0]
     assert item["kind"] == "expert_review"
     assert item["freshness"] == "STALE"
+    assert item["freshness_reason"] == "FACT_CHANGED"
     assert item["resolved"] is False
+    result = Discrepancies(w.svc).invalidate_changed_source(w.owner, w.company, review["id"])
+    assert result["invalidated"] is False
+    assert result["state"] == "UNASSIGNED"
+    assert result["revision"] == review["revision"]
+
+
+def test_review_report_builds_one_source_context_for_multiple_reviews(w, monkeypatch):
+    work = setup_sources(w)
+    events = work.list(w.owner, w.company)
+    selected = [invoice(work, w), next(event for event in events if event["kind"] == "bank")]
+    reviews = ReviewCases(w.svc)
+    for index, event in enumerate(selected):
+        reviews.open(w.owner, w.company, ReviewRequest(
+            event_id=event["id"],
+            reason="Shared report context",
+            idempotency_key=f"shared-context-{index:02d}",
+        ))
+    original = Casework._source_context
+    calls: list[str] = []
+
+    def counted_source_context(self, c, company):
+        calls.append(company)
+        return original(self, c, company)
+
+    monkeypatch.setattr(Casework, "_source_context", counted_source_context)
+    report = Discrepancies(w.svc).list(w.owner, w.company)
+    review_items = [item for item in report["items"] if item["kind"] == "expert_review"]
+    assert len(review_items) == 2
+    assert all(item["freshness"] == "CURRENT" for item in review_items)
+    assert calls == [w.company]
 
 
 def test_other_company_same_page_does_not_become_saved_revision(w):

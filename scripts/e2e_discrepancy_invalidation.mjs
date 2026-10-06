@@ -165,10 +165,47 @@ async function clickInvalidate(client, id, expected) {
     setTimeout(() => { waiter.disconnect(); reject(new Error('missing invalidate button')); }, 15000);
   })`);
 }
+async function clickRereview(client, id, eventId) {
+  const posted = client.once('Network.responseReceived', (params) => params.response.url.endsWith('/expert-reviews') && params.response.status === 201);
+  const listed = client.once('Network.responseReceived', (params) => params.response.url.includes('/discrepancies') && !params.response.url.includes('/invalidate'));
+  await evaluate(client, `document.querySelector('[data-rereview=${q(id)}]').click()`);
+  const [postResponse, listResponse] = await Promise.all([posted, listed]);
+  const current = await evaluate(client, `new Promise((resolve, reject) => {
+    const find = () => [...document.querySelectorAll('[data-discrepancy]')].find((card) =>
+      card.dataset.sourceEvent === ${q(eventId)}
+      && card.dataset.discrepancy !== ${q(id)}
+      && card.dataset.freshness === 'CURRENT'
+      && card.dataset.state === 'UNASSIGNED');
+    const found = find();
+    if (found) return resolve({ id: found.dataset.discrepancy, state: found.dataset.state, freshness: found.dataset.freshness });
+    const observer = new MutationObserver(() => {
+      const card = find();
+      if (!card) return;
+      observer.disconnect();
+      resolve({ id: card.dataset.discrepancy, state: card.dataset.state, freshness: card.dataset.freshness });
+    });
+    observer.observe(document.querySelector('#discrepancy-inbox'), { childList: true, subtree: true, attributes: true });
+    setTimeout(() => { observer.disconnect(); reject(new Error('fresh review did not render')); }, 15000);
+  })`);
+  return {
+    postStatus: postResponse.response.status,
+    listStatus: listResponse.response.status,
+    ...current,
+  };
+}
 async function cardState(client, id) {
   return evaluate(client, `(() => {
     const card = document.querySelector('[data-discrepancy=${q(id)}]');
-    return card ? { state: card.dataset.state, text: card.innerText, present: true } : { present: false };
+    return card ? {
+      state: card.dataset.state,
+      freshness: card.dataset.freshness,
+      freshnessReason: card.dataset.freshnessReason || '',
+      sourceEvent: card.dataset.sourceEvent || '',
+      rereview: Boolean(card.querySelector('[data-rereview]')),
+      invalidate: Boolean(card.querySelector('[data-invalidate]')),
+      text: card.innerText,
+      present: true,
+    } : { present: false };
   })()`);
 }
 async function shoot(client, name, id) {
@@ -233,15 +270,22 @@ try {
       const resetExit = await new Promise((resolve) => reset.once('exit', resolve));
       if (resetExit !== 0) fail(label + ' reset');
       await login(client, fixture.owner, fixture.password);
-      const ownerRetained = await retainedCards(client, [fixture.changed_review, fixture.equal_review, fixture.foreign_review]);
+      const ownerRetained = await retainedCards(client, [fixture.changed_review, fixture.equal_review, fixture.fact_changed_review, fixture.foreign_review]);
       check(label + ' owner session starts without retained cards', Object.values(ownerRetained).every((present) => present === false));
       await openQuestions(client);
       const changed = await cardState(client, fixture.changed_review);
       const equal = await cardState(client, fixture.equal_review);
+      const fact = await cardState(client, fixture.fact_changed_review);
       const foreign = await cardState(client, fixture.foreign_review);
       check(label + ' changed review visible', changed.present && changed.state === 'UNASSIGNED');
       check(label + ' equal review visible', equal.present && equal.state === 'UNASSIGNED');
+      check(label + ' fact-only review is distinctly stale', fact.present && fact.freshness === 'STALE' && fact.freshnessReason === 'FACT_CHANGED');
+      check(label + ' fact-only review offers re-review not invalidation', fact.rereview === true && fact.invalidate === false);
       check(label + ' foreign review absent', foreign.present === false);
+      await shoot(client, label + '-owner-fact-changed.png', fixture.fact_changed_review);
+      const rereview = await clickRereview(client, fixture.fact_changed_review, fixture.fact_event);
+      check(label + ' re-review uses existing endpoint', rereview.postStatus === 201 && rereview.listStatus === 200);
+      check(label + ' fact re-review creates a current unassigned review', rereview.state === 'UNASSIGNED' && rereview.freshness === 'CURRENT');
       const invalidated = await clickInvalidate(client, fixture.changed_review, { state: 'SOURCE_INVALIDATED' });
       check(label + ' changed marker invalidates', invalidated.state === 'SOURCE_INVALIDATED' && invalidated.text.includes('무효'));
       const preserved = await clickInvalidate(client, fixture.equal_review, { state: 'UNASSIGNED' });
@@ -252,7 +296,7 @@ try {
       await shoot(client, label + '-owner-equal.png', fixture.equal_review);
       await logout(client);
       await login(client, fixture.viewer, fixture.password);
-      const viewerRetained = await retainedCards(client, [fixture.changed_review, fixture.equal_review, fixture.foreign_review]);
+      const viewerRetained = await retainedCards(client, [fixture.changed_review, fixture.equal_review, fixture.fact_changed_review, fixture.foreign_review]);
       check(label + ' viewer session drops prior cards before refresh', Object.values(viewerRetained).every((present) => present === false));
       await openQuestions(client);
       const denied = await clickInvalidate(client, fixture.equal_review, { state: 'UNASSIGNED' });
@@ -260,10 +304,10 @@ try {
       await shoot(client, label + '-viewer.png', fixture.equal_review);
       await logout(client);
       await login(client, fixture.foreign, fixture.password);
-      const foreignRetained = await retainedCards(client, [fixture.changed_review, fixture.equal_review]);
+      const foreignRetained = await retainedCards(client, [fixture.changed_review, fixture.equal_review, fixture.fact_changed_review]);
       check(label + ' foreign session drops other company before refresh', Object.values(foreignRetained).every((present) => present === false));
       await openQuestions(client);
-      check(label + ' foreign ui hides other company', (await cardState(client, fixture.changed_review)).present === false && (await cardState(client, fixture.equal_review)).present === false && (await cardState(client, fixture.foreign_review)).present === true);
+      check(label + ' foreign ui hides other company', (await cardState(client, fixture.changed_review)).present === false && (await cardState(client, fixture.equal_review)).present === false && (await cardState(client, fixture.fact_changed_review)).present === false && (await cardState(client, fixture.foreign_review)).present === true);
       await shoot(client, label + '-foreign.png', fixture.foreign_review);
       await logout(client);
     }

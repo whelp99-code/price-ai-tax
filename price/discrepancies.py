@@ -44,6 +44,7 @@ class InboxItem(TypedDict):
     reason: str | None
     state: str | None
     freshness: str
+    freshness_reason: str | None
     resolved: bool
     observed_at: str | None
     source_revision: str | None
@@ -136,9 +137,15 @@ class Discrepancies:
                     self._quarantine_item(c, company, row)
                     for row in self.db.list(c, company, QUARANTINE_KIND)
                 ]
+                reviews = self.db.list(c, company, REVIEW_KIND)
+                source_context = (
+                    self.reviews.work._source_context(c, company)
+                    if any(row.get("state") != INVALIDATED_STATE for row in reviews)
+                    else None
+                )
                 items.extend(
-                    self._review_item(c, company, row)
-                    for row in self.db.list(c, company, REVIEW_KIND)
+                    self._review_item(c, company, row, source_context)
+                    for row in reviews
                 )
                 report = InboxReport(items=items, read_only=True, live_source_checked=False)
             finally:
@@ -190,6 +197,7 @@ class Discrepancies:
             reason=_optional_text(row.get("reason")),
             state="QUARANTINED",
             freshness=freshness,
+            freshness_reason=None,
             resolved=False,
             observed_at=_optional_text(row.get("updated_at")),
             source_revision=observed,
@@ -209,17 +217,21 @@ class Discrepancies:
             limitations=limitations,
         )
 
-    def _review_item(self, c, company: str, row: dict[str, object]) -> InboxItem:
+    def _review_item(self, c, company: str, row: dict[str, object], source_context) -> InboxItem:
         ident = _required_text(row.get("id"))
         revision = _required_revision(row.get("revision"))
-        freshness = "STALE" if row.get("state") == INVALIDATED_STATE else "CURRENT"
-        if freshness != "STALE":
+        freshness_reason = "SOURCE_INVALIDATED" if row.get("state") == INVALIDATED_STATE else None
+        if freshness_reason is None:
             try:
-                self.reviews._fresh(c, company, ident, revision)
+                self.reviews._fresh(c, company, ident, revision, source_context=source_context)
             except DomainError as error:
-                if error.code not in _SOURCE_STALE:
+                if error.code == "REVIEW_FACT_CHANGED":
+                    freshness_reason = "FACT_CHANGED"
+                elif error.code in _SOURCE_INVALIDATION:
+                    freshness_reason = "SOURCE_CHANGED"
+                else:
                     raise
-                freshness = "STALE"
+        freshness = "STALE" if freshness_reason is not None else "CURRENT"
         verified = row.get("professional_credential_verified") is True
         return InboxItem(
             id=ident,
@@ -228,6 +240,7 @@ class Discrepancies:
             reason=_optional_text(row.get("reason")),
             state=_optional_text(row.get("state")),
             freshness=freshness,
+            freshness_reason=freshness_reason,
             resolved=False,
             observed_at=_optional_text(row.get("updated_at")),
             source_revision=revision_text(row.get("source_context_hash")),
