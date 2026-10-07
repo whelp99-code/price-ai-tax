@@ -26,8 +26,12 @@ def register_operations_routes(app,service,actor_dependency):
     p='/api/companies/{company}'
 
     @app.get(p+'/discrepancies')
-    def discrepancy_list(company:str,a:Annotated[Actor,Depends(actor_dependency)]):
+    def list_discrepancies(company:str,a:Annotated[Actor,Depends(actor_dependency)]):
         return discrepancies.list(a,company)
+
+    @app.post(p+'/discrepancies/{ident}/invalidate')
+    def invalidate_discrepancy(company:str,ident:str,a:Actor=Depends(actor_dependency)):
+        return discrepancies.invalidate_changed_source(a,company,ident)
 
     @app.get(p+'/owner/reports')
     def owner_report(company:str,start:date,end:date,a:Actor=Depends(actor_dependency)):

@@ -223,7 +223,7 @@ class Discrepancies:
         freshness_reason = "SOURCE_INVALIDATED" if row.get("state") == INVALIDATED_STATE else None
         if freshness_reason is None:
             try:
-                self.reviews._fresh(c, company, ident, revision)
+                self.reviews._fresh(c, company, ident, revision, source_context=source_context)
             except DomainError as error:
                 if error.code == "REVIEW_FACT_CHANGED":
                     freshness_reason = "FACT_CHANGED"

@@ -12,7 +12,7 @@ from .auth import Actor
 from .db import Database, digest
 from .models import TransactionInput
 from .notion_finance_map import Hold, Mapped, MapReport
-from .service import Service
+from .service import Service, WRITERS
 
 NS_PAGE = "transaction:notion"
 NS_APPROVAL = "hometax-approval"
@@ -131,15 +131,20 @@ def _stamp_provenance(db: Database, company: str, object_id: str, provenance: di
 
 def _link_approval(db: Database, company: str, approval: str, object_id: str, body_hash: str) -> None:
     with db.transaction() as c:
-        owner = _approval_owner(c, company, approval)
-        if owner is None:
+        row = c.execute(
+            "SELECT object_id, body_hash FROM external_ids WHERE company_id=? AND namespace=? AND external_id=?",
+            (company, NS_APPROVAL, approval),
+        ).fetchone()
+        if row is None:
             c.execute(
                 "INSERT INTO external_ids VALUES(?,?,?,?,?)",
                 (company, NS_APPROVAL, approval, body_hash, object_id),
             )
             return
-        if owner != object_id:
+        if row["object_id"] != object_id:
             raise RuntimeError("approval key belongs to another object")
+        if row["body_hash"] == body_hash:
+            return
         c.execute(
             "UPDATE external_ids SET body_hash=? WHERE company_id=? AND namespace=? AND external_id=?",
             (body_hash, company, NS_APPROVAL, approval),
@@ -207,6 +212,8 @@ def apply_drafts(
 ) -> dict[str, Any]:
     """Insert or refresh drafts. Never writes kind=journal."""
     svc = Service(db)
+    with db.connect() as c:
+        svc.auth.guard(c, actor, company, WRITERS)
     inserted = updated = quarantined = unchanged = provenance_writes = 0
     disappeared: list[str] = []
     quarantine_rows: list[dict[str, Any]] = []
