@@ -4,6 +4,7 @@ Owner screens consume summaries; specialist inputs stay on the review API.
 No API caller can install an adapter or enable live financial execution.
 """
 from datetime import date
+from typing import Annotated
 from fastapi import Depends
 from .auth import Actor
 from .finance_ops import FinanceOps,ScheduleInput
@@ -12,15 +13,21 @@ from .review_cases import ReviewCases,ReviewRequest,ReviewAssignment,ReviewFindi
 from .submission_gateway import SubmissionGateway,PackageInput,PackageRevision
 from .release_readiness import ReleaseReadiness
 from .pipeline_health import PipelineHealth
+from .discrepancies import Discrepancies
 
 
 def register_operations_routes(app,service,actor_dependency):
     finance=FinanceOps(service);tax=TaxWorkpapers(service);reviews=ReviewCases(service)
     gateway=SubmissionGateway(service);release=ReleaseReadiness(service)
     pipeline=PipelineHealth(service)
+    discrepancies=Discrepancies(service)
     app.state.finance_ops=finance;app.state.tax_workpapers=tax;app.state.review_cases=reviews
     app.state.submission_gateway=gateway;app.state.release_readiness=release
     p='/api/companies/{company}'
+
+    @app.get(p+'/discrepancies')
+    def discrepancy_list(company:str,a:Annotated[Actor,Depends(actor_dependency)]):
+        return discrepancies.list(a,company)
 
     @app.get(p+'/owner/reports')
     def owner_report(company:str,start:date,end:date,a:Actor=Depends(actor_dependency)):
