@@ -12,6 +12,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from .auth import Actor, SESSION_SECONDS
+from .ai import Advisor
 from .db import Database, DomainError, now, uid
 from .service import Service, WRITERS
 from .filing import Filings
@@ -46,7 +47,7 @@ class BodyLimit:
         await self.app(scope, replay, send)
 
 
-def create_app(db_path=None, advisor=None):
+def create_app(db_path: str | Path | None = None, advisor: Advisor | None = None) -> FastAPI:
     db = Database(db_path or os.getenv("PRICE_DB", ".data/price.sqlite3"))
     svc = Service(db, advisor)
     filing, queue = Filings(svc), Queue(svc)

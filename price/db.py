@@ -103,7 +103,8 @@ class Database:
             raise DomainError("STALE_VERSION", "다른 작업이 변경했습니다. 새로고침 후 다시 확인하세요.")
         return self.get(c, company, kind, ident)
 
-    def audit(self, c, company: str, actor: str, action: str, entity: str, detail: dict | None = None):
+    def audit(self, c: sqlite3.Connection, company: str, actor: str, action: str, entity: str,
+              detail: dict[str, object] | None = None) -> str:
         row = c.execute("SELECT event_hash FROM audit WHERE company_id=? ORDER BY seq DESC LIMIT 1", (company,)).fetchone()
         previous = row[0] if row else "0" * 64
         event = dict(company_id=company, actor=actor, action=action, entity_id=entity,
@@ -113,7 +114,7 @@ class Database:
                   (company, actor, action, entity, event["at"], canonical(event["detail"]), previous, h))
         return h
 
-    def verify_audit(self, c, company: str) -> dict:
+    def verify_audit(self, c: sqlite3.Connection, company: str) -> dict[str, object]:
         previous, count = "0" * 64, 0
         for r in c.execute("SELECT * FROM audit WHERE company_id=? ORDER BY seq", (company,)):
             event = {k: r[k] for k in ("company_id", "actor", "action", "entity_id", "at", "previous_hash")}
@@ -123,7 +124,7 @@ class Database:
             previous, count = r["event_hash"], count + 1
         return {"valid": True, "events": count, "head": previous, "external_anchor": False}
 
-    def backup(self, target: Path) -> dict:
+    def backup(self, target: Path) -> dict[str, object]:
         target = target.expanduser().resolve()
         if target.exists() or target == self.path:
             raise DomainError("TARGET_EXISTS", "기존 파일은 덮어쓰지 않습니다.")

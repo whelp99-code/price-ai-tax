@@ -4,6 +4,7 @@ Owner screens consume summaries; specialist inputs stay on the review API.
 No API caller can install an adapter or enable live financial execution.
 """
 from datetime import date
+from typing import Annotated
 from fastapi import Depends
 from .auth import Actor
 from .finance_ops import FinanceOps,ScheduleInput
@@ -25,7 +26,7 @@ def register_operations_routes(app,service,actor_dependency):
     p='/api/companies/{company}'
 
     @app.get(p+'/discrepancies')
-    def list_discrepancies(company:str,a:Actor=Depends(actor_dependency)):
+    def list_discrepancies(company:str,a:Annotated[Actor,Depends(actor_dependency)]):
         return discrepancies.list(a,company)
 
     @app.post(p+'/discrepancies/{ident}/invalidate')

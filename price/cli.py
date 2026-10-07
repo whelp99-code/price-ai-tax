@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import argparse
 import getpass
 import hashlib
@@ -6,21 +7,41 @@ import json
 import os
 import sqlite3
 from pathlib import Path
+
 from .db import Database, DomainError
-from .service import Service
 from .models import CompanyInput
+from .service import Service
 
 
-def main():
+class Arguments(argparse.Namespace):
+    db: str = ""
+    command: str = ""
+    demo: bool = False
+    company: str = ""
+    username: str = ""
+    host: str = ""
+    port: int = 0
+    target: str = ""
+    source: str = ""
+    sha256: str = ""
+    user: str = ""
+    admin: str = ""
+
+
+def main() -> None:
     parser = argparse.ArgumentParser(description="price — standalone AI tax-agent validation release")
-    parser.add_argument("--db", default=os.getenv("PRICE_DB", ".data/price.sqlite3"))
+    _ = parser.add_argument("--db", default=os.getenv("PRICE_DB", ".data/price.sqlite3"))
     sub = parser.add_subparsers(dest="command", required=True)
-    init = sub.add_parser("init"); init.add_argument("--demo", action="store_true"); init.add_argument("--company", default="내 회사"); init.add_argument("--username", default="owner")
-    serve = sub.add_parser("serve"); serve.add_argument("--host", default="127.0.0.1"); serve.add_argument("--port", type=int, default=int(os.getenv("PRICE_PORT", "4381")))
-    backup = sub.add_parser("backup"); backup.add_argument("target")
-    restore = sub.add_parser("restore"); restore.add_argument("source"); restore.add_argument("target"); restore.add_argument("--sha256", required=True)
-    sub.add_parser("status")
-    args = parser.parse_args()
+    init = sub.add_parser("init"); _ = init.add_argument("--demo", action="store_true"); _ = init.add_argument("--company", default="내 회사"); _ = init.add_argument("--username", default="owner")
+    serve = sub.add_parser("serve"); _ = serve.add_argument("--host", default="127.0.0.1"); _ = serve.add_argument("--port", type=int, default=int(os.getenv("PRICE_PORT", "4381")))
+    backup = sub.add_parser("backup"); _ = backup.add_argument("target")
+    restore = sub.add_parser("restore"); _ = restore.add_argument("source"); _ = restore.add_argument("target"); _ = restore.add_argument("--sha256", required=True)
+    _ = sub.add_parser("status")
+    disable = sub.add_parser("disable-user")
+    _ = disable.add_argument("--company", required=True)
+    _ = disable.add_argument("--user", required=True)
+    _ = disable.add_argument("--admin", required=True)
+    args = parser.parse_args(namespace=Arguments())
     try:
         if args.command == "restore":
             source, target = Path(args.source).resolve(), Path(args.target).resolve()
@@ -36,8 +57,8 @@ def main():
                 dst = sqlite3.connect(target)
                 try:
                     src.backup(dst)
-                    dst.execute("DELETE FROM sessions")
-                    dst.execute("UPDATE jobs SET state='QUEUED',lease_until=0 WHERE state='RUNNING'")
+                    _ = dst.execute("DELETE FROM sessions")
+                    _ = dst.execute("UPDATE jobs SET state='QUEUED',lease_until=0 WHERE state='RUNNING'")
                     dst.commit()
                 finally: dst.close()
             finally: src.close()
@@ -56,18 +77,29 @@ def main():
                 print(json.dumps({"company_id": company, "username": actor.username, "demo": False}, ensure_ascii=False))
         elif args.command == "backup":
             print(json.dumps(db.backup(Path(args.target)), ensure_ascii=False, indent=2))
+        elif args.command == "disable-user":
+            token, actor = svc.auth.login(args.admin, getpass.getpass("Administrator password: "))
+            try:
+                result = svc.auth.disable_user(actor, args.company, args.user)
+            finally:
+                svc.auth.logout(token)
+            print(json.dumps(result, indent=2))
         elif args.command == "status":
             with db.connect() as c:
                 print(json.dumps({"db": str(db.path), "project": "price", "worker": "price", "companies": c.execute("SELECT count(*) FROM companies").fetchone()[0], "objects": c.execute("SELECT count(*) FROM objects").fetchone()[0], "integrity": c.execute("PRAGMA integrity_check").fetchone()[0], "live_filing": False}, ensure_ascii=False, indent=2))
         elif args.command == "serve":
             with db.connect() as c:
-                rows = c.execute("SELECT body FROM companies").fetchall()
+                rows: list[sqlite3.Row] = c.execute("SELECT body FROM companies").fetchall()
                 if not rows: raise DomainError("NOT_INITIALIZED", "먼저 init 명령으로 초기화하세요.")
-                demo = any(json.loads(r[0]).get("demo") for r in rows)
-            if args.host not in ("127.0.0.1", "localhost", "::1"):
-                if demo or os.getenv("PRICE_ALLOW_PUBLIC_BIND") != "1" or os.getenv("PRICE_SECURE_COOKIE") != "1":
-                    raise DomainError("PUBLIC_BIND_BLOCKED", "데모 공개 노출은 금지됩니다. 운영 공개 배치는 TLS·보안 검토가 필요합니다.")
+                bodies: list[str] = [row[0] for row in rows]
+                profiles: list[dict[str, object]] = [json.loads(body) for body in bodies]
+                demo = any(profile.get("demo") for profile in profiles)
+            if args.host not in ("127.0.0.1", "localhost", "::1") and (
+                demo or os.getenv("PRICE_ALLOW_PUBLIC_BIND") != "1" or os.getenv("PRICE_SECURE_COOKIE") != "1"
+            ):
+                raise DomainError("PUBLIC_BIND_BLOCKED", "데모 공개 노출은 금지됩니다. 운영 공개 배치는 TLS·보안 검토가 필요합니다.")
             import uvicorn
+
             from .api import create_app
             uvicorn.run(create_app(args.db), host=args.host, port=args.port, access_log=False)
     except (DomainError, ValueError) as exc:
