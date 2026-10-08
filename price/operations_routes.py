@@ -14,6 +14,7 @@ from .submission_gateway import SubmissionGateway,PackageInput,PackageRevision
 from .release_readiness import ReleaseReadiness
 from .pipeline_health import PipelineHealth
 from .discrepancies import Discrepancies
+from .crm_bindings import CRMCompanyBindings, CRMCompanyCandidate
 
 
 def register_operations_routes(app,service,actor_dependency):
@@ -24,6 +25,17 @@ def register_operations_routes(app,service,actor_dependency):
     app.state.finance_ops=finance;app.state.tax_workpapers=tax;app.state.review_cases=reviews
     app.state.submission_gateway=gateway;app.state.release_readiness=release
     p='/api/companies/{company}'
+
+    crm_bindings=CRMCompanyBindings(service)
+
+    @app.post(p+'/crm-company-binding',status_code=201)
+    def register_crm_company_binding(company:str,data:CRMCompanyCandidate,
+                                    a:Annotated[Actor,Depends(actor_dependency)]):
+        return crm_bindings.register(a,company,data)
+
+    @app.get(p+'/crm-company-binding')
+    def get_crm_company_binding(company:str,a:Annotated[Actor,Depends(actor_dependency)]):
+        return crm_bindings.get(a,company)
 
     @app.get(p+'/discrepancies')
     def list_discrepancies(company:str,a:Annotated[Actor,Depends(actor_dependency)]):
