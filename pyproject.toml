@@ -19,7 +19,7 @@ price = "price.cli:main"
 include = ["price*"]
 
 [tool.setuptools.package-data]
-price = ["static/*", "schema.sql"]
+price = ["static/*", "schema.sql", "rt_registration.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
