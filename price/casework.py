@@ -48,7 +48,7 @@ def amount_text(value):
 
 def economic_values(record):
     v=record['values']
-    return {'date':v.get('date'), 'reference':v.get('reference'),
+    values = {'date':v.get('date'), 'reference':v.get('reference'),
             'gross':amount_text(v.get('gross')), 'net':amount_text(v.get('net')),
             'tax':amount_text(v.get('tax')), 'currency':v.get('currency'),
             'supplier_id':normalized_id(v.get('supplier_id')), 'buyer_id':normalized_id(v.get('buyer_id')),
@@ -59,12 +59,19 @@ def economic_values(record):
             'counterparty_id':normalized_id(v.get('counterparty_id')),
             'counterparty_account':normalized_id(v.get('counterparty_account')),
             'direction':v.get('direction')}
+    # Optional business references affect freshness only when the source has them.
+    for field in ('order_reference','project_id','order_status','payment_terms','delivery_status','claim_status','due_date','cash_kind'):
+        if v.get(field) is not None:
+            values[field] = v[field]
+    return values
 
 
 def identity_key(record):
     v=economic_values(record);kind=record['kind'];ref=v['reference']
     if kind in ('tax_invoice_list','tax_invoice_xml') and ref and v['supplier_id'] and v['buyer_id']:
         return ['invoice',v['supplier_id'],v['buyer_id'],ref]
+    if kind=='purchase_order' and ref and v.get('project_id') and v['supplier_id'] and v['buyer_id']:
+        return ['purchase_order',v['supplier_id'],v['buyer_id'],v['project_id'],ref]
     if kind=='card_transactions' and ref and v['card'] and not any(x in v['card'] for x in ('*','X')):
         return ['card',v['card'],(v['date'] or '')[:10],ref,v['status'],v['original_reference']]
     if kind=='bank_statement' and ref and v['account']:
@@ -79,16 +86,16 @@ def event_shape(records,profile):
     identity_conflict=len(comparisons)>1
     number=normalized_id(profile.get('business_number')) if profile else ''
     owned={(x['kind'],normalized_id(x['identifier'])) for x in (profile or {}).get('instruments',[])}
-    kind='invoice' if first['kind'] in ('tax_invoice_list','tax_invoice_xml') else 'card' if first['kind']=='card_transactions' else 'bank' if first['kind']=='bank_statement' else 'unknown'
+    kind='invoice' if first['kind'] in ('tax_invoice_list','tax_invoice_xml') else 'purchase_order' if first['kind']=='purchase_order' else 'card' if first['kind']=='card_transactions' else 'bank' if first['kind']=='bank_statement' else 'unknown'
     direction=None;ownership='unconfirmed';counterparty=''
-    if kind=='invoice' and number:
+    if kind in ('invoice','purchase_order') and number:
         if v['supplier_id']==number and v['buyer_id']!=number:
             direction='sale';ownership='owner_confirmed';counterparty=v['buyer_id']
         elif v['buyer_id']==number and v['supplier_id']!=number:
             direction='purchase';ownership='owner_confirmed';counterparty=v['supplier_id']
-    elif kind=='bank' and ('bank',v['account']) in owned and '*' not in v['account'] and 'X' not in v['account']:
+    elif kind=='bank' and isinstance(v['account'],str) and ('bank',v['account']) in owned and '*' not in v['account'] and 'X' not in v['account']:
         ownership='owner_confirmed';direction=v['direction'];counterparty=v['counterparty_id']
-    elif kind=='card' and ('card',v['card']) in owned:
+    elif kind=='card' and isinstance(v['card'],str) and ('card',v['card']) in owned:
         # Masked card IDs can be confirmed for context, never used as sole identity proof.
         ownership='masked_owner_statement' if any(x in v['card'] for x in ('*','X')) else 'owner_confirmed'
         direction='purchase';counterparty=v['counterparty_id']
@@ -97,6 +104,8 @@ def event_shape(records,profile):
     if not v['currency']:issues.append('CURRENCY_UNCONFIRMED')
     if v['gross'] is None:issues.append('AMOUNT_UNCONFIRMED')
     if ownership=='unconfirmed':issues.append('OWNERSHIP_UNCONFIRMED')
+    if kind=='purchase_order' and (not v['reference'] or not v.get('project_id')):
+        issues.append('ORDER_REFERENCE_UNCONFIRMED')
     if v['gross'] is not None and Decimal(v['gross'])<0:issues.append('CORRECTION_REVIEW')
     if v['original_reference'] or any(token in str(v['status'] or '').lower() for token in ('취소','cancel','수정','refund')):issues.append('CORRECTION_REVIEW')
     if any(r['values'].get('amendment_code') for r in records):issues.append('CORRECTION_REVIEW')
@@ -214,7 +223,7 @@ class Casework:
             active=c.execute("SELECT u.username FROM users u JOIN memberships m ON m.user_id=u.id WHERE u.id=? AND m.company_id=? AND m.role='reviewer' AND u.disabled=0",(review['assignee'],company)).fetchone()
             if active:assignment={'user_id':review['assignee'],'name':active[0],'state':review['state'],'professional_credential_verified':review.get('professional_credential_verified',False)}
             if assignment and state=='REVIEW_CONNECTION_NEEDED':state='IN_REVIEW' if review['state']=='IN_REVIEW' else 'REVIEW_ASSIGNED' if review['state']=='ASSIGNED' else 'REVIEW_RESULT_PENDING_ACCOUNTING'
-        return {**event,'facts':{k:v['answer'] for k,v in answers.items()},'fact_revisions':{k:v['revision'] for k,v in answers.items()},'fact_actor_ids':sorted({v['answered_by'] for v in answers.values() if v.get('answered_by')}),'facts_from_sources':[k for k,v in answers.items() if v.get('derived_from_sources')],
+        return {**event,'facts':{k:v['answer'] for k,v in answers.items()},'fact_revisions':{k:v['revision'] for k,v in answers.items()},'fact_actor_ids':sorted({str(v['answered_by']) for v in answers.values() if v.get('answered_by')}),'facts_from_sources':[k for k,v in answers.items() if v.get('derived_from_sources')],
                 'questions':questions,'state':state,'expert_assignee':assignment,'review_id':review['id'] if review else None,'accounting_complete':False}
 
     def _source_cash_answer(self,c,company,event,context=None,derived_cash=None):
@@ -277,7 +286,7 @@ class Casework:
             if event['revision']!=data.expected_revision or event['context_hash']!=data.context_hash:
                 raise DomainError('STALE_VERSION','자료가 변경되어 질문을 다시 확인해야 합니다.')
             answers=self._answers(c,company,event)
-            allowed={q['key'] for q in self._questions(event,{k:v for k,v in answers.items() if k!=data.question})}
+            allowed={str(q['key']) for q in self._questions(event,{k:v for k,v in answers.items() if k!=data.question})}
             if data.question not in allowed:raise DomainError('FACT_NOT_REQUESTED','이 거래에 필요하지 않은 질문입니다.',422)
             old=answers.get(data.question)
             if data.expected_fact_revision!=(old['revision'] if old else 0):raise DomainError('FACT_STALE_VERSION','다른 답변이 먼저 저장됐습니다. 현재 사실을 확인한 뒤 정정하세요.')

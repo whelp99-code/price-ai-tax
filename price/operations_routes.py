@@ -3,11 +3,10 @@
 Owner screens consume summaries; specialist inputs stay on the review API.
 No API caller can install an adapter or enable live financial execution.
 """
-from datetime import date
 from typing import Annotated
-from fastapi import Depends
+from fastapi import Depends,Query
 from .auth import Actor
-from .finance_ops import FinanceOps,ScheduleInput
+from .finance_ops import FinanceOps,OwnerReportQuery,ScheduleInput
 from .tax_workpapers import TaxWorkpapers,CorporateWorkpaperInput,CarryforwardInput,PayrollReconciliationInput
 from .review_cases import ReviewCases,ReviewRequest,ReviewAssignment,ReviewFinding,ReviewRevision
 from .submission_gateway import SubmissionGateway,PackageInput,PackageRevision
@@ -47,8 +46,8 @@ def register_operations_routes(app,service,actor_dependency):
         return discrepancies.invalidate_changed_source(a,company,ident)
 
     @app.get(p+'/owner/reports')
-    def owner_report(company:str,start:date,end:date,a:Actor=Depends(actor_dependency)):
-        return finance.report(a,company,start,end)
+    def owner_report(company:str,data:Annotated[OwnerReportQuery,Query()],a:Actor=Depends(actor_dependency)):
+        return finance.report(a,company,data.start,data.end,data.expected_source_revision)
 
     @app.post(p+'/accounting-schedules',status_code=201)
     def schedule(company:str,data:ScheduleInput,a:Actor=Depends(actor_dependency)):
