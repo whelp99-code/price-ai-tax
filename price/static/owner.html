@@ -16,13 +16,14 @@
 <section id="owner-workspace" hidden>
 <div id="mode-banner" class="banner" role="status"></div>
 <div class="intro"><span class="eyebrow">내 회사의 자료함</span><h1 id="owner-title">자료를 맡기고,<br>필요한 것만 확인하세요.</h1><p id="owner-stage"></p></div>
-<nav class="tabs" aria-label="대표님 업무"><button data-view="upload" aria-selected="true">1. 자료 올리기</button><button data-view="questions" aria-selected="false">2. 답변이 필요한 것 <span id="question-count"></span></button><button data-view="results" aria-selected="false">3. 결과 보기</button></nav>
+<div class="tabs" role="tablist" aria-label="대표님 업무"><button type="button" role="tab" data-view="upload" aria-selected="true">1. 자료 올리기</button><button type="button" role="tab" data-view="questions" aria-selected="false">2. 답변이 필요한 것 <span id="question-count"></span></button><button type="button" role="tab" data-view="results" aria-selected="false">3. 결과 보기</button><button type="button" role="tab" data-view="discrepancies" aria-selected="false">불일치 검토함</button></div>
 <section id="view-upload" class="owner-view">
 <div id="drop-zone" class="drop-zone" tabindex="0" role="button" aria-label="통장 카드 세금계산서 파일 선택"><div class="upload-mark" aria-hidden="true">↑</div><h2>가지고 있는 자료를 그대로 올려주세요.</h2><p>통장내역 · 카드내역 · 세금계산서 · 영수증<br>파일 내용을 고치거나 거래를 다시 입력할 필요가 없습니다.</p><button id="choose-files" class="primary" type="button">파일 선택</button><input id="owner-files" type="file" multiple hidden accept=".csv,.tsv,.txt,.xls,.xlsx,.xml,.pdf,.png,.jpg,.jpeg"><p class="small">파일당 50 MB · 한 번에 100개 / 총 500 MB까지 접수<br>개발 검증된 읽기: 한글 표 CSV/TSV·XLSX·HTML형 XLS, KEC 세금계산서 XML, 열이 명확한 텍스트 PDF 표와 사업자등록증. 기관별 실양식 인수는 별도이며 스캔·암호·구형 바이너리 XLS·미지 양식은 확인 대기로 구분합니다.</p></div>
 <div id="transfer-panel" class="panel" hidden><div class="row"><strong id="transfer-label"></strong><div><button id="pause-transfer" class="quiet">일시중지</button><button id="cancel-transfer" class="quiet">전송 취소</button></div></div><progress id="transfer-progress" max="100" value="0" aria-label="파일 전송 진행률"></progress><p id="transfer-message" class="small" aria-live="polite"></p></div>
 <div class="section-title"><h2>올린 자료</h2><button id="refresh-documents" class="quiet">상태 새로고침</button></div><div id="document-list" class="document-list" aria-live="polite"></div>
 </section>
 <section id="view-questions" class="owner-view" hidden><div class="panel"><h2>대표님만 아는 사실을 확인합니다.</h2><p>회사 정보와 자료의 실제 용도만 확인합니다. 계정과목이나 세금 공제 여부는 묻지 않습니다.</p><div id="owner-questions"></div></div></section>
+<section id="view-discrepancies" class="owner-view" hidden></section>
 <section id="view-results" class="owner-view" hidden><div id="result-stats" class="stats"></div><div class="panel"><h2>자료 확인과 업무 완료는 다릅니다.</h2><p id="result-notice"></p><div id="pending-summary"></div></div></section>
 <p id="owner-error" role="alert" class="error"></p>
 <footer><span>원본을 보존하고 처리 상태를 남깁니다.</span><a href="/expert">전문가 작업실</a><a href="/bookkeeping">장부 검토 담당자 화면</a></footer>

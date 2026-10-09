@@ -20,34 +20,43 @@ function discardDiscrepancySession() {
   discrepancyGeneration += 1;
   discrepancyToken = '';
   $('#discrepancy-inbox')?.remove();
+  $('#amount-discrepancy-inbox')?.remove();
 }
-function discrepancyRoot() {
-  let root = $('#discrepancy-inbox');
+function discrepancyRoot(amountOnly) {
+  const id = amountOnly ? 'amount-discrepancy-inbox' : 'discrepancy-inbox';
+  let root = $('#' + id);
   if (!root) {
     root = element('div', undefined, 'panel');
-    root.id = 'discrepancy-inbox';
-    $('#view-questions').append(root);
+    root.id = id;
+    $(amountOnly ? '#view-discrepancies' : '#view-questions').append(root);
   }
   return root;
 }
 function discrepancyStillCurrent(generation, company, token) {
   return generation === discrepancyGeneration && company === state.company && token === state.csrf && token === discrepancyToken;
 }
-async function renderDiscrepancies() {
+async function renderDiscrepancies(amountOnly = false) {
+  amountOnly = amountOnly === true;
+  const title = amountOnly ? '불일치 검토함' : '자료 불일치 개정 확인';
+  const refresh = () => renderDiscrepancies(amountOnly);
   const generation = ++discrepancyGeneration;
   const company = state.company;
   const token = state.csrf;
   discrepancyToken = token;
-  const root = discrepancyRoot();
-  root.replaceChildren(element('h2', '자료 불일치 개정 확인'));
+  const root = discrepancyRoot(amountOnly);
+  root.replaceChildren(element('h2', title));
   if (!company || !token) return;
   root.append(element('p', '저장된 개정 표시를 불러오는 중입니다.', 'small'));
   try {
-    const result = await request(prefix('/discrepancies'));
+    const result = await request(prefix('/discrepancies' + (amountOnly ? '?amount_only=true' : '')));
     if (!discrepancyStillCurrent(generation, company, token)) return;
-    root.replaceChildren(element('h2', '자료 불일치 개정 확인'), button('개정 확인 새로고침', renderDiscrepancies));
-    root.append(element('p', '목록 조회는 기록을 바꾸지 않습니다. 재검토 요청은 검토 건을 만들고, 원본 변경 무효는 저장 상태를 바꿉니다.', 'note'));
-    if (!result.items.length) root.append(element('p', '저장된 격리·전문 검토 기록이 없습니다. 전체 자료가 일치한다는 뜻은 아닙니다.', 'empty'));
+    root.replaceChildren(element('h2', title), button('새로고침', refresh));
+    root.append(element('p', amountOnly
+      ? '저장된 금액에 차이가 있는 자료만 표시합니다. 조회와 펼쳐보기는 검토 완료나 금액 변경이 아닙니다. 외부 원문은 다시 읽지 않았습니다.'
+      : '목록 조회는 기록을 바꾸지 않습니다. 재검토 요청은 검토 건을 만들고, 원본 변경 무효는 저장 상태를 바꿉니다.', 'note'));
+    if (!result.items.length) root.append(element('p', amountOnly
+      ? '확인된 금액 차이가 없습니다. 원본 누락이나 전체 자료의 일치 여부는 답변이 필요한 것에서 확인하세요.'
+      : '저장된 격리·전문 검토 기록이 없습니다. 전체 자료가 일치한다는 뜻은 아닙니다.', 'empty'));
     for (const item of result.items) {
       const card = element('details');
       card.dataset.discrepancy = item.id;
@@ -60,11 +69,23 @@ async function renderDiscrepancies() {
       const summaryText = discrepancyReviewReasonText[item.freshness_reason]
         || discrepancyFreshnessText[item.freshness]
         || discrepancyFreshnessText.UNKNOWN;
-      const summary = element('summary', summaryText);
+      const summary = element('summary', amountOnly
+        ? '금액 불일치 · 합계 차이 ' + discrepancyMoney(item.differences?.gross) + ' · ' + (item.resolved ? '검토함' : '미검토')
+        : summaryText);
       card.append(summary);
+      if (amountOnly) {
+        card.append(element('p', summaryText, 'small'));
+        if (item.page_id) {
+          const link = element('a', 'Notion 원본 (외부)');
+          link.href = 'https://www.notion.so/' + encodeURIComponent(item.page_id.replaceAll('-', ''));
+          link.target = '_blank';
+          link.rel = 'noopener noreferrer';
+          card.append(link);
+        }
+      }
       card.append(element('p', '저장된 검토 상태: ' + (item.state || '없음'), 'small'));
       if (item.state === 'SOURCE_INVALIDATED') card.append(element('p', '저장된 검토 상태가 원본 변경으로 무효가 되었습니다. 이전 판단은 현재 근거가 아닙니다.', 'note'));
-      if (item.kind === 'expert_review' && item.state !== 'SOURCE_INVALIDATED') {
+      if (!amountOnly && item.kind === 'expert_review' && item.state !== 'SOURCE_INVALIDATED') {
         if (item.freshness_reason === 'FACT_CHANGED') {
           if (['owner', 'preparer'].includes(state.home?.company?.role)) {
             const action = button('바뀐 사실로 재검토 요청', async () => {
@@ -144,12 +165,14 @@ async function renderDiscrepancies() {
     }
   } catch (error) {
     if (discrepancyStillCurrent(generation, company, token)) {
-      root.replaceChildren(element('h2', '개정 확인 조회 실패'), element('p', error.message, 'error'), button('다시 조회', renderDiscrepancies));
+      root.replaceChildren(element('h2', title + ' 조회 실패'), element('p', error.message, 'error'), button('다시 조회', refresh));
     }
   }
 }
 document.querySelector('[data-view="questions"]').addEventListener('click', renderDiscrepancies);
+document.querySelector('[data-view="discrepancies"]').addEventListener('click', () => renderDiscrepancies(true));
 $('#owner-company').addEventListener('change', () => {
   discardDiscrepancySession();
   if (!$('#view-questions').hidden) renderDiscrepancies();
+  if (!$('#view-discrepancies').hidden) renderDiscrepancies(true);
 });

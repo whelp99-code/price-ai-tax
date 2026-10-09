@@ -10,7 +10,7 @@ from price.casework import Casework
 from price.db import DomainError
 from price.discrepancies import Discrepancies, freshness_of, krw, revision_text
 from price.review_cases import ReviewCases, ReviewRequest
-from tests.conftest import PASSWORD
+from tests.conftest import PASSWORD, World
 from tests.test_casework import answer, invoice, setup_sources
 from tests.test_notion_finance_ingest import _apply, _row
 
@@ -27,6 +27,42 @@ def test_missing_revision_is_unknown_and_invalid_money_is_not_zero():
     assert freshness_of("2026-10-01T00:00:00Z", "2026-10-02T00:00:00Z") == "STALE"
     assert freshness_of("2026-10-01T00:00:00Z", "2026-10-01T00:00:00Z") == "STORED_UNCHANGED"
     assert krw(None) is None and krw(True) is None and krw("1100") is None and krw(1.2) is None
+
+
+def test_amount_only_keeps_signed_and_partial_deltas_without_writes(w: World):
+    _ = _apply(w.db, w.owner, w.company, [_row("amount-page", gross=1100)])
+    with w.db.transaction() as c:
+        for gross, net, tax in [
+            (2200, 2000, 200), (0, 0, 0), (1100, 1000, 100),
+            (None, None, None), (1100, 900, 200),
+        ]:
+            _ = w.db.create(c, w.company, "notion_quarantine", {
+                "page_id": "amount-page", "reason": "synthetic",
+                "gross": gross, "net": net, "tax": tax, "author": w.owner.id,
+            })
+        _ = w.db.create(c, w.company, "notion_quarantine", {
+            "page_id": "missing-page", "reason": "synthetic",
+            "gross": 2200, "net": 2000, "tax": 200, "author": w.owner.id,
+        })
+    with w.db.connect() as c:
+        before = _rows(c)
+    box = Discrepancies(w.svc)
+    assert len(box.list(w.viewer, w.company)["items"]) == 6
+    items = box.list(w.viewer, w.company, amount_only=True)["items"]
+    assert len(items) == 3
+    gross_deltas: set[str | None] = set()
+    for item in items:
+        assert item["differences"] is not None
+        gross_deltas.add(item["differences"]["gross"])
+    assert gross_deltas == {"1100", "-1100", "0"}
+    with w.db.connect() as c:
+        assert _rows(c) == before
+    client = TestClient(create_app(w.db.path))
+    login = client.post("/api/login", json={"username": w.viewer.username, "password": PASSWORD})
+    assert login.status_code == 200
+    response = client.get(f"/api/companies/{w.company}/discrepancies?amount_only=true")
+    assert response.status_code == 200
+    assert len(response.json()["items"]) == 3
 
 
 def test_same_page_revision_change_is_stale_without_writes(w):

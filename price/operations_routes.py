@@ -38,8 +38,9 @@ def register_operations_routes(app,service,actor_dependency):
         return crm_bindings.get(a,company)
 
     @app.get(p+'/discrepancies')
-    def list_discrepancies(company:str,a:Annotated[Actor,Depends(actor_dependency)]):
-        return discrepancies.list(a,company)
+    def list_discrepancies(company:str,a:Annotated[Actor,Depends(actor_dependency)],
+                           amount_only:bool=False):
+        return discrepancies.list(a,company,amount_only=amount_only)
 
     @app.post(p+'/discrepancies/{ident}/invalidate')
     def invalidate_discrepancy(company:str,ident:str,a:Actor=Depends(actor_dependency)):
