@@ -98,6 +98,7 @@ def register_upload_routes(app, service, actor_dependency):
                     {'id': 'korean-csv-bank', 'kind': 'bank_statement', 'verification': 'synthetic_only'},
                     {'id': 'korean-csv-card', 'kind': 'card_transactions', 'verification': 'synthetic_only'},
                     {'id': 'korean-csv-invoice-list', 'kind': 'tax_invoice_list', 'verification': 'synthetic_only'},
+                    {'id': 'korean-csv-purchase-order', 'kind': 'purchase_order', 'verification': 'synthetic_only'},
                     {'id': 'bounded-source-xlsx', 'kind': 'source_workbook', 'verification': 'synthetic_only'},
                     {'id': 'company-text-facts', 'kind': 'company_registration', 'verification': 'synthetic_only'},
                     {'id': 'kec-tax-invoice-facts', 'kind': 'tax_invoice_xml', 'verification': 'synthetic_only', 'signature_verified': False},
