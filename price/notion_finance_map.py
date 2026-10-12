@@ -6,13 +6,19 @@ figures disagree with an external approval, is HOLD.
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import date
-from typing import Any, Mapping
+from typing import Literal
+
+from pydantic import JsonValue
 
 from .models import TransactionInput
 
-CLASSIFICATION = {
+CLASSIFICATION: dict[
+    str,
+    tuple[Literal["invoice", "bank"], Literal["sale", "purchase", "receipt", "payment"]],
+] = {
     "매출": ("invoice", "sale"),
     "매입": ("invoice", "purchase"),
     "기타입금": ("bank", "receipt"),
@@ -79,7 +85,7 @@ class MapReport:
         return sum(item.gross for item in self.loaded if item.direction == "purchase")
 
 
-def _money(value: Any, label: str) -> int | Hold:
+def _money(value: JsonValue, label: str) -> int | Hold:
     if isinstance(value, bool) or not isinstance(value, int):
         return Hold("", "", f"{label} is not an integer; not fixed")
     if value < 0:
@@ -112,7 +118,7 @@ def _approval(natural_key: str, memo: str) -> tuple[str | None, str | None]:
     return from_key or from_memo, None
 
 
-def _counterparty(props: Mapping[str, Any]) -> str:
+def _counterparty(props: Mapping[str, JsonValue]) -> str:
     named = props.get("거래처")
     if isinstance(named, str) and named.strip():
         return named.strip()[:160]
@@ -121,10 +127,11 @@ def _counterparty(props: Mapping[str, Any]) -> str:
     return (head or title or "unknown")[:160]
 
 
-def map_row(row: Mapping[str, Any]) -> Mapped | Hold:
+def map_row(row: Mapping[str, JsonValue]) -> Mapped | Hold:
     """Map one snapshot finance object. Does not read a database."""
     page_id = str(row.get("sourceId") or "").strip()
-    props = row.get("properties") if isinstance(row.get("properties"), Mapping) else row
+    properties = row.get("properties")
+    props = properties if isinstance(properties, Mapping) else row
     classification = str(props.get("구분") or "").strip()
     if not page_id:
         return Hold("", classification, "missing notion page id; not fixed")
@@ -135,7 +142,7 @@ def map_row(row: Mapping[str, Any]) -> Mapped | Hold:
     raw_tax = props.get("부가세")
     if kind == "bank" and raw_tax in (None, ""):
         raw_tax = 0
-    amounts = []
+    amounts: list[int] = []
     for label, value in (("net", props.get("금액")), ("tax", raw_tax), ("gross", props.get("합계"))):
         parsed = _money(value, label)
         if isinstance(parsed, Hold):
@@ -174,8 +181,9 @@ def map_row(row: Mapping[str, Any]) -> Mapped | Hold:
             tax,
             gross,
         )
+    processed_date = props.get("실제 처리일")
     event_date = _date_from(
-        props.get("실제 처리일") if isinstance(props.get("실제 처리일"), str) else None,
+        processed_date if isinstance(processed_date, str) else None,
         str(props.get("거래명") or ""),
         str(props.get("자연키") or ""),
         str(props.get("메모") or ""),
@@ -237,7 +245,7 @@ def purchase_match_verdict(loaded_gross: int, hometax_gross: int, holds: list[Ho
     """
     gap = hometax_gross - loaded_gross
     status = "PASS" if gap == 0 else "FAIL"
-    parts = []
+    parts: list[str] = []
     explained = 0
     for hold in holds:
         if hold.classification != "매입" or hold.external_gross is None or hold.gross is None:
@@ -256,7 +264,7 @@ def purchase_match_verdict(loaded_gross: int, hometax_gross: int, holds: list[Ho
 
 
 def map_snapshot(
-    rows: list[Mapping[str, Any]],
+    rows: list[Mapping[str, JsonValue]],
     external_purchases: Mapping[str, tuple[int, int, int]] | None = None,
 ) -> MapReport:
     report = MapReport(rows=len(rows))
