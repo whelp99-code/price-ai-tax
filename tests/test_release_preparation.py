@@ -1,11 +1,14 @@
 """Pinned source preparation and real readonly health smoke; synthetic DBs only."""
 from __future__ import annotations
 
+import py_compile
 import sqlite3
 import subprocess
 import sys
+import tarfile
 from contextlib import closing
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from pydantic import TypeAdapter
@@ -17,6 +20,7 @@ from scripts.prepare_release import (
     ROOT,
     TARGET,
     ReleaseError,
+    main,
     prepare_release,
     verify_release,
 )
@@ -73,6 +77,60 @@ def test_tampered_release_is_rejected_before_smoke_start(prepared: Path) -> None
     _ = (prepared / "price/api.py").write_text("# changed synthetic release copy\n")
     with pytest.raises(ReleaseError, match="RELEASE_SOURCE_MISMATCH"):
         _ = readonly_health.health_smoke(ROOT, prepared, Path(sys.executable))
+
+
+@pytest.mark.parametrize("relative", [
+    "price/__pycache__/api.cpython-314.pyc",
+    "price/__pycache__/nested/runtime",
+    "price/api.pyc",
+])
+def test_verify_only_accepts_runtime_artifacts(prepared: Path, relative: str) -> None:
+    artifact = prepared / relative
+    artifact.parent.mkdir(parents=True, exist_ok=True)
+    _ = artifact.write_bytes(b"")
+    result = subprocess.run(
+        [
+            sys.executable, str(ROOT / "scripts/prepare_release.py"),
+            "--repo", str(ROOT), "--releases-root", str(prepared.parent), "--verify-only",
+        ],
+        capture_output=True, text=True, check=True, timeout=10,
+    )
+    report = TypeAdapter(dict[str, str | int | bool]).validate_json(result.stdout)
+    assert report["commit"] == TARGET
+    assert report["activated"] is False
+
+
+def test_verify_release_accepts_generated_bytecode(prepared: Path) -> None:
+    bytecode = py_compile.compile(str(prepared / "price/api.py"), doraise=True)
+    assert bytecode is not None and Path(bytecode).is_file()
+    assert verify_release(ROOT, prepared)["commit"] == TARGET
+
+
+def test_bytecode_does_not_hide_modified_source(prepared: Path) -> None:
+    _ = py_compile.compile(str(prepared / "price/api.py"), doraise=True)
+    _ = (prepared / "price/api.py").write_text("# changed synthetic release source\n")
+    with pytest.raises(ReleaseError, match="RELEASE_SOURCE_MISMATCH"):
+        _ = verify_release(ROOT, prepared)
+
+
+def test_unsupported_extraction_filter_rejects_and_removes_destination(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    root = tmp_path / "releases"
+    extractall = tarfile.TarFile.extractall
+
+    def legacy_extractall(archive: tarfile.TarFile, destination: Path) -> None:
+        """Use the pre-3.11.4 call signature: no filter keyword is accepted."""
+        extractall(archive, destination, filter="data")
+
+    with patch.object(tarfile.TarFile, "extractall", legacy_extractall), patch.object(
+        sys, "argv", ["prepare_release", "--repo", str(ROOT), "--releases-root", str(root)],
+    ), pytest.raises(SystemExit) as error:
+        main()
+    report = TypeAdapter(dict[str, str]).validate_json(capsys.readouterr().out)
+    assert error.value.code == 1
+    assert report == {"status": "REJECTED", "reason": "EXTRACTION_FILTER_UNSUPPORTED"}
+    assert not (root / TARGET).exists()
 
 
 def test_uri_remains_readonly_after_permissions_and_query_flag_change(readonly_fixture: Path) -> None:

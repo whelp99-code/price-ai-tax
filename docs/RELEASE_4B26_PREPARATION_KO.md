@@ -43,6 +43,8 @@ python scripts/prepare_release.py \
 Git의 정확한 커밋 archive만 풀고 `.price-release.json`으로 소스 해시를 묶는다. 작업 트리의 미추적 DB·세션·환경 파일은 복사하지 않는다. archive에 그런 파일이나 symlink가 있으면 거부한다.
 기존 대상 폴더나 깨진 symlink도 `TARGET_EXISTS`로 거부하며 덮어쓰지 않는다. 이미 준비한 폴더는 다음 실제 해시 검증만 실행한다.
 
+추출의 `filter` 인자를 지원하지 않는 인터프리터(Python 3.11.0–3.11.3)는 `EXTRACTION_FILTER_UNSUPPORTED`로 거부하고 이번에 생성한 대상 폴더를 삭제한다. 필터 없는 추출로 재시도하지 않는다.
+
 ```sh
 python scripts/prepare_release.py \
   --repo /home/jm/orca/lanes/price \
@@ -50,6 +52,8 @@ python scripts/prepare_release.py \
   --commit 4b2623a22488d7038e5c132ce87a398a3f5045c8 \
   --verify-only
 ```
+
+운영 Python이 생성하는 `__pycache__` 안의 파일과 `.pyc`는 소스 대조에서 제외한다. 나머지 파일과 manifest는 고정 Git archive와 계속 대조하므로, 바이트코드가 존재해도 원본 `.py` 변경은 `RELEASE_SOURCE_MISMATCH`로 거부한다. symlink 거부도 유지한다.
 
 ## 읽기 전용 health 확인
 

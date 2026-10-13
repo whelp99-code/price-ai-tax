@@ -87,8 +87,11 @@ def verify_release(repo: Path, release: Path, commit: str = TARGET) -> ReleaseRe
     for path in release.rglob("*"):
         if path.is_symlink():
             raise ReleaseError("RELEASE_SYMLINK")
-        if path.is_file() and path.relative_to(release).as_posix() != MANIFEST:
-            actual[path.relative_to(release).as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
+        relative = path.relative_to(release)
+        if "__pycache__" in relative.parts or relative.suffix == ".pyc":
+            continue
+        if path.is_file() and relative.as_posix() != MANIFEST:
+            actual[relative.as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
     if actual != files or (release / MANIFEST).read_text() != manifest_text(commit, files):
         raise ReleaseError("RELEASE_SOURCE_MISMATCH")
     return {"release": str(release), "commit": commit, "source_files": len(files), "activated": False}
@@ -109,7 +112,10 @@ def prepare_release(repo: Path, releases_root: Path, commit: str = TARGET) -> Re
     destination.mkdir(mode=0o700)
     try:
         with tarfile.open(fileobj=io.BytesIO(raw)) as archive:
-            archive.extractall(destination, filter="data")
+            try:
+                archive.extractall(destination, filter="data")
+            except TypeError as exc:
+                raise ReleaseError("EXTRACTION_FILTER_UNSUPPORTED") from exc
         _ = (destination / MANIFEST).write_text(manifest_text(commit, files))
         return verify_release(repo, destination, commit)
     except (OSError, tarfile.TarError, ReleaseError, subprocess.SubprocessError):
