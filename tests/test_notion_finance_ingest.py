@@ -247,3 +247,46 @@ def test_disappeared_page_is_reported_not_deleted(scratch):
     with db.connect() as c:
         n = c.execute("SELECT count(*) FROM objects WHERE kind='transaction'").fetchone()[0]
     assert n == 1
+
+
+def test_missing_later_issue_date_rejects_before_any_write(tmp_path: Path):
+    import contextlib
+    import importlib.util
+    import io
+    import sys
+
+    spec = importlib.util.spec_from_file_location(
+        "notion_finance_ingest_date_gate",
+        Path(__file__).resolve().parents[1] / "scripts" / "notion_finance_ingest.py",
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    db_path = tmp_path / "scratch.sqlite3"
+    opened = Database(db_path)
+    Service(opened).auth.bootstrap(CompanyInput(name="scratch-date"), "scratch-date", "scratch-secret-date")
+    before = db_path.read_bytes()
+    dated = _row("page-dated", approval="202609011234567890123456")
+    missing = _row("page-missing", approval="202609021234567890123457")
+    missing["properties"]["거래명"] = "작성일 없음"
+    snapshot = tmp_path / "snap.json"
+    snapshot.write_text(json.dumps({"finance": [dated, missing]}), encoding="utf-8")
+    export = tmp_path / "exports"
+    export.mkdir()
+    (export / "hometax_purchase_etax_20260901_20261020.csv").write_text("승인번호,합계금액,공급가액,세액\n", encoding="utf-8")
+    argv = sys.argv
+    sys.argv = [
+        "notion_finance_ingest",
+        "--snapshot", str(snapshot),
+        "--db", str(db_path),
+        "--hometax-dir", str(export),
+        "--period-start", "2026-09-01",
+        "--period-end", "2026-10-20",
+    ]
+    try:
+        with pytest.raises(SystemExit, match="purchase issue date missing"):
+            with contextlib.redirect_stdout(io.StringIO()):
+                module.main()
+    finally:
+        sys.argv = argv
+    assert db_path.read_bytes() == before
+    assert list(tmp_path.glob("*.sqlite3")) == [db_path]

@@ -214,3 +214,30 @@ def test_main_without_flags_rejects_missing_filename_period(tmp_path, monkeypatc
     monkeypatch.setattr("sys.argv", ["s2", "--snapshot", str(snapshot), "--hometax-dir", str(exports)])
     with pytest.raises(SystemExit, match="purchase period missing"):
         S2.main()
+
+
+def test_explicit_period_rejects_extra_purchase_files_before_merge(tmp_path: Path):
+    named = tmp_path / "hometax_purchase_etax_20260901_20261020.csv"
+    named.write_text(HEADER + _csv_row(INSIDE, "1100", "1000", "100"), encoding="utf-8")
+    other = tmp_path / "hometax_purchase_other.csv"
+    other.write_text(HEADER + _csv_row(OUTSIDE, "2200", "2000", "200"), encoding="utf-8")
+    unrelated = tmp_path / "notes.csv"
+    unrelated.write_text("memo\nnot a tax file\n", encoding="utf-8")
+    window = (START, END)
+    with pytest.raises(SystemExit, match="unverified purchase file"):
+        S2.resolve_purchase_period(tmp_path, START, END)
+    with pytest.raises(SystemExit, match="unverified purchase file"):
+        S2.read_hometax_purchase_sources(tmp_path, window)
+    other.unlink()
+    from tests.test_hometax_purchase_csv import _xlsx
+
+    _xlsx(tmp_path / "TAX_extra_BuyHomeTax.xlsx", [(OUTSIDE, "2000", "200", "2200")])
+    with pytest.raises(SystemExit, match="unverified purchase file"):
+        S2.resolve_purchase_period(tmp_path, START, END)
+    with pytest.raises(SystemExit, match="unverified purchase file"):
+        S2.read_hometax_purchase_sources(tmp_path, window)
+    found, separate = S2.read_hometax_purchase_sources(tmp_path)
+    assert found[INSIDE] == (1000, 100, 1100)
+    assert found[OUTSIDE] == (2000, 200, 2200)
+    assert separate == []
+    assert unrelated.read_text(encoding="utf-8").startswith("memo")

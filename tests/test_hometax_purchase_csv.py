@@ -955,7 +955,10 @@ def test_dry_run_and_reconciliation_share_purchase_intersection(purchase_match):
     ))
     if purchase_match:
         report.loaded.append(SimpleNamespace(
-            classification="매입", direction="purchase", approval=purchase, gross=110,
+            classification="매입", direction="purchase", approval=purchase, net=100, tax=10, gross=110,
+        ))
+        report.loaded.append(SimpleNamespace(
+            classification="매입", direction="purchase", approval=negative, net=-20, tax=-2, gross=-22,
         ))
         report.holds.extend([
             Hold("duplicate", "매입", "held", gross=110, approval=purchase),
@@ -1071,3 +1074,32 @@ def test_csv_names_are_filtered_before_reading_and_suffix_is_case_insensitive(tm
     monkeypatch.setattr(Path, "read_bytes", guarded_read)
     assert S2.read_hometax_purchase_sources(tmp_path) == ({approval: (100, 10, 110)}, [])
     assert reads == [selected]
+
+
+def test_hold_missing_or_bool_amounts_are_not_matched_by_approval():
+    from types import SimpleNamespace
+
+    from price.notion_finance_map import Hold
+
+    approval = "202601010000000000000001"
+    hometax = {approval: (1000, 100, 1100)}
+    missing = Hold("page-hold", "매입", "invoice tax is 0; not fixed", approval=approval)
+    boolean = Hold("page-bool", "매입", "not an integer", net=True, tax=False, gross=True, approval=approval)
+    loaded = SimpleNamespace(
+        classification="매입", direction="purchase", approval=approval, net=1000, tax=100, gross=1100, held=False,
+    )
+    assert S2._matched_purchase_approvals(S2.MapReport(holds=[missing]), hometax) == set()
+    assert S2._matched_purchase_approvals(S2.MapReport(holds=[boolean]), hometax) == set()
+    assert S2._matched_purchase_approvals(S2.MapReport(loaded=[loaded]), hometax) == {approval}
+    for net, tax, gross in [(None, 100, 1100), (1000, None, 1100), (1000, 100, None),
+                            (True, 100, 1100), (1000, "100", 1100), (1000, 100, 1100.0)]:
+        malformed = SimpleNamespace(
+            classification="매입", direction="purchase", approval=approval,
+            net=net, tax=tax, gross=gross, held=False,
+        )
+        assert S2._matched_purchase_approvals(S2.MapReport(loaded=[malformed]), hometax) == set()
+    complete_hold = Hold("page-held", "매입", "requires review", net=1000, tax=100, gross=1100, approval=approval)
+    assert S2._matched_purchase_approvals(S2.MapReport(holds=[complete_hold]), hometax) == set()
+    text = S2.reconciliation(S2.MapReport(holds=[missing]), hometax, None)
+    assert "| hometax matched approvals | 0 |" in text
+    assert "| hometax matched gross | 0 |" in text

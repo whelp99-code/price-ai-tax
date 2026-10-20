@@ -101,7 +101,6 @@ def main() -> None:
     payload = json.loads(args.snapshot.read_text())
     finance = payload["finance"]
     if args.hometax_dir:
-        hometax, separate = read_hometax_purchase_sources(args.hometax_dir)
         period = None
         if args.period_start or args.period_end:
             period = resolve_purchase_period(
@@ -109,12 +108,16 @@ def main() -> None:
                 parse_period_arg(args.period_start, "period start") if args.period_start else None,
                 parse_period_arg(args.period_end, "period end") if args.period_end else None,
             )
+        hometax, separate = read_hometax_purchase_sources(args.hometax_dir, period)
     else:
         if args.period_start or args.period_end:
             raise SystemExit("period requires --hometax-dir")
         hometax, separate = {}, []
         period = None
     mapped = map_snapshot(finance, hometax)
+    period_report = purchase_period_report(mapped, period) if period is not None else None
+    if period_report is not None and period_report["blocked"]:
+        raise SystemExit("purchase issue date missing; period match blocked")
     db = Database(db_path)
     with db.connect() as c:
         journals_before = c.execute("SELECT count(*) FROM objects WHERE kind='journal'").fetchone()[0]
@@ -154,8 +157,7 @@ def main() -> None:
     ]
     result["hometax_separate_gross"] = sum(int(item.get("gross") or 0) for item in separate)
     result["hometax_all_row_gross"] = sum(item[2] for item in hometax.values()) + result["hometax_separate_gross"]
-    if period is not None:
-        period_report = purchase_period_report(mapped, period)
+    if period_report is not None:
         result["purchase_period"] = {
             "start": period_report["period_start"],
             "end": period_report["period_end"],
@@ -166,8 +168,6 @@ def main() -> None:
             "missing_issue_date_count": period_report["missing_issue_date_count"],
             "pass_blocked": period_report["blocked"],
         }
-        if period_report["blocked"]:
-            raise SystemExit("purchase issue date missing; period match blocked")
     result["core_ingest_reads_hometax"] = False
     if result["journals"] != int(journals_before):
         raise SystemExit("draft ingest created a journal")

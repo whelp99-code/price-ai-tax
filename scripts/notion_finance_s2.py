@@ -253,6 +253,7 @@ def read_hometax_purchases(directory: Path) -> dict[str, tuple[int, int, int]]:
 
 def read_hometax_purchase_sources(
     directory: Path,
+    period: tuple[date, date] | None = None,
 ) -> tuple[dict[str, tuple[int, int, int]], list[dict[str, str]]]:
     """Read xlsx (current dir only) and explicitly marked purchase CSV files.
 
@@ -272,14 +273,24 @@ def read_hometax_purchase_sources(
     Amounts are (net, tax, gross) = CSV 공급가액/세액/합계금액.
     UTF-8/CP949 decoding reuses price.ingest_safety.text_decode for the whole file.
     Identical approval+amounts across xlsx and CSV are stored once.
+    When a period is resolved, only files whose filename period is that window
+    are read. An extra purchase CSV or XLSX is rejected, not merged.
     """
+    if period is not None:
+        _reject_unverified_period_sources(directory, period)
     found: dict[str, tuple[int, int, int]] = {}
     separate: list[dict[str, str]] = []
     for path in sorted(directory.glob("TAX_*BuyHomeTax.xlsx")):
+        if not path.is_file():
+            continue
+        if period is not None and _source_issue_period(path) != period:
+            raise SystemExit("unverified purchase file outside the resolved export period: " + path.name)
         _read_hometax_xlsx(path, found, separate)
     for path in sorted(directory.rglob("*")):
         if path.suffix.casefold() != ".csv" or not _csv_is_hometax_purchase(path) or not path.is_file():
             continue
+        if period is not None and _source_issue_period(path) != period:
+            raise SystemExit("unverified purchase file outside the resolved export period: " + path.name)
         _read_hometax_csv(path, found, separate)
     return found, separate
 
@@ -288,20 +299,34 @@ def tail(value: str) -> str:
     return value[-4:] if value else ""
 
 
+def _strict_purchase_amounts(item: object) -> tuple[int, int, int] | None:
+    values = []
+    for name in ("net", "tax", "gross"):
+        value = getattr(item, name, None)
+        if isinstance(value, bool) or not isinstance(value, int):
+            return None
+        values.append(value)
+    return values[0], values[1], values[2]
+
+
 def _matched_purchase_approvals(report: MapReport, hometax: dict[str, tuple[int, int, int]]) -> set[str]:
-    return {
-        item.approval
-        for item in (*report.loaded, *report.holds)
-        if getattr(item, "classification", "") == "매입" and getattr(item, "approval", None)
-        and not (
-            getattr(item, "held", False) is True
-            and all(getattr(item, name, None) is not None for name in ("net", "tax", "gross"))
-        )
-        and (
-            any(getattr(item, name, None) is None for name in ("net", "tax", "gross"))
-            or hometax.get(item.approval) == (item.net, item.tax, item.gross)
-        )
-    } & set(hometax)
+    """Intersect purchase approvals with Hometax original amounts.
+
+    A complete strict integer triple must equal the source row. A hold is not
+    promoted when net, tax, and gross are all absent or any of them is not a strict int.
+    """
+    matched: set[str] = set()
+    for item in (*report.loaded, *report.holds):
+        approval = getattr(item, "approval", None)
+        if getattr(item, "classification", "") != "매입" or not approval or approval not in hometax:
+            continue
+        if getattr(item, "held", False) is True:
+            continue
+        amounts = _strict_purchase_amounts(item)
+        if amounts is None or hometax[approval] != amounts:
+            continue
+        matched.add(approval)
+    return matched
 
 
 def dry_run_text(report: MapReport, hometax: dict[str, tuple[int, int, int]]) -> str:
@@ -460,7 +485,9 @@ def resolve_purchase_period(
                 "purchase period missing: pass --period-start and --period-end, "
                 "or provide exactly one hometax_purchase_etax_YYYYMMDD_YYYYMMDD.csv"
             )
-        return named[0][1]
+        period = named[0][1]
+        _reject_unverified_period_sources(directory, period)
+        return period
     if start is None or end is None:
         raise SystemExit("period start and end must both be set")
     if start > end:
@@ -468,7 +495,34 @@ def resolve_purchase_period(
     conflicts = [path.name for path, parsed in named if parsed != (start, end)]
     if conflicts:
         raise SystemExit("explicit period disagrees with filename period: " + ",".join(conflicts))
-    return start, end
+    period = (start, end)
+    _reject_unverified_period_sources(directory, period)
+    return period
+
+
+def _source_issue_period(path: Path) -> tuple[date, date] | None:
+    """Verified purchase-export filename period. A generic dated name is not verified."""
+    if path.suffix.casefold() != ".csv":
+        return None
+    return period_from_export_name(path.name)
+
+
+def _reject_unverified_period_sources(directory: Path, period: tuple[date, date]) -> None:
+    """Filename validation and ingestion reject the same unverified purchase files.
+
+    Unrelated CSV files stay excluded. Explicit dates do not waive an extra file.
+    """
+    extras: list[str] = []
+    for path in sorted(directory.glob("TAX_*BuyHomeTax.xlsx")):
+        if path.is_file() and _source_issue_period(path) != period:
+            extras.append(path.name)
+    for path in sorted(directory.rglob("*")):
+        if not path.is_file() or path.suffix.casefold() != ".csv" or not _csv_is_hometax_purchase(path):
+            continue
+        if _source_issue_period(path) != period:
+            extras.append(path.name)
+    if extras:
+        raise SystemExit("unverified purchase file outside the resolved export period: " + ",".join(extras))
 
 
 def purchase_period_report(
@@ -719,14 +773,14 @@ def main() -> None:
     parser.add_argument("--period-end")
     args = parser.parse_args()
     payload = json.loads(args.snapshot.read_text())
-    hometax, separate = read_hometax_purchase_sources(args.hometax_dir)
-    report = map_snapshot(payload["finance"], hometax)
-    report.hometax_separate = separate
     period = resolve_purchase_period(
         args.hometax_dir,
         parse_period_arg(args.period_start, "period start") if args.period_start else None,
         parse_period_arg(args.period_end, "period end") if args.period_end else None,
     )
+    hometax, separate = read_hometax_purchase_sources(args.hometax_dir, period)
+    report = map_snapshot(payload["finance"], hometax)
+    report.hometax_separate = separate
     period_report = purchase_period_report(report, period)
     report = scope_purchase_report(report, period)
     text = dry_run_text(report, hometax)
