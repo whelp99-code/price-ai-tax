@@ -18,13 +18,24 @@ from price.db import Database
 import importlib.util
 
 from price.notion_finance_ingest import apply_drafts, edited_index
-from price.notion_finance_map import map_snapshot
+from price.notion_finance_map import Hold, Mapped, map_snapshot
+
+
+def _purchase_approval(item: Mapped | Hold) -> str | None:
+    if getattr(item, "classification", "") != "매입":
+        return None
+    approval = getattr(item, "approval", None)
+    if approval:
+        return approval
+    stored = getattr(item, "keys", {}).get("hometax-approval") if hasattr(item, "keys") else None
+    return stored or None
 
 _s2 = Path(__file__).with_name("notion_finance_s2.py")
 _spec = importlib.util.spec_from_file_location("notion_finance_s2", _s2)
 _mod = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_mod)
 read_hometax_purchases = _mod.read_hometax_purchases
+read_hometax_purchase_sources = _mod.read_hometax_purchase_sources
 
 DEMO = Path("/home/jm/orca/projects/price/.data/demo.sqlite3").resolve()
 
@@ -84,7 +95,10 @@ def main() -> None:
         backup_path = backup_sqlite(db_path, args.backup_dir)
     payload = json.loads(args.snapshot.read_text())
     finance = payload["finance"]
-    hometax = read_hometax_purchases(args.hometax_dir) if args.hometax_dir else {}
+    if args.hometax_dir:
+        hometax, separate = read_hometax_purchase_sources(args.hometax_dir)
+    else:
+        hometax, separate = {}, []
     mapped = map_snapshot(finance, hometax)
     db = Database(db_path)
     with db.connect() as c:
@@ -93,6 +107,22 @@ def main() -> None:
     result = apply_drafts(db, actor, company, mapped, edited_index(finance))
     result["backup"] = str(backup_path) if backup_path else None
     result["journals_before"] = int(journals_before)
+    result["hometax_numeric"] = len(hometax)
+    result["hometax_separate_non_digit"] = len(separate)
+    notion_approvals = {
+        approval
+        for item in (*mapped.loaded, *mapped.holds)
+        if (approval := _purchase_approval(item))
+    }
+    matched_approvals = set(hometax) & notion_approvals
+    result["hometax_matched"] = len(matched_approvals)
+    result["hometax_separate"] = [
+        {"approval_tail": item.get("approval_tail", ""), "gross": item.get("gross", ""), "reason": item.get("reason", "")}
+        for item in separate
+    ]
+    result["hometax_separate_gross"] = sum(int(item.get("gross") or 0) for item in separate)
+    result["hometax_all_row_gross"] = sum(item[2] for item in hometax.values()) + result["hometax_separate_gross"]
+    result["core_ingest_reads_hometax"] = False
     if result["journals"] != int(journals_before):
         raise SystemExit("draft ingest created a journal")
     text = json.dumps(result, ensure_ascii=False)

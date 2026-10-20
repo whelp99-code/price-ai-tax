@@ -26,8 +26,8 @@ CLASSIFICATION: dict[
 }
 
 _DATE = re.compile(r"(20\d{2}-\d{2}-\d{2})")
-_APPROVAL_MEMO = re.compile(r"홈택스 승인번호:\s*([0-9]{8,24})")
-_INVOICE_KEY = re.compile(r"^invoice\|([0-9]{8,24})$")
+_APPROVAL_EXACT = re.compile(r"^[0-9]{24}$")
+_INVOICE_KEY = re.compile(r"^invoice\|([0-9]{24})$")
 
 SOURCE = "notion"
 
@@ -41,6 +41,7 @@ class Hold:
     tax: int | None = None
     gross: int | None = None
     approval_tail: str = ""
+    approval: str | None = None
     counterparty: str = ""
     external_gross: int | None = None
 
@@ -73,6 +74,7 @@ class MapReport:
     by_class: dict[str, int] = field(default_factory=dict)
     loaded: list[Mapped] = field(default_factory=list)
     holds: list[Hold] = field(default_factory=list)
+    hometax_separate: list[dict[str, str]] = field(default_factory=list)
 
     def purchase_notion_gross(self) -> int:
         total = 0
@@ -103,19 +105,39 @@ def _date_from(*texts: str | None) -> date | None:
     return None
 
 
-def _approval(natural_key: str, memo: str) -> tuple[str | None, str | None]:
-    """Return (approval, conflict_reason). Never picks a winner."""
+def _labeled_approval_token(memo: str) -> tuple[str | None, bool, str]:
+    """Return the token immediately after an explicit Hometax approval label.
+
+    A later bare 24-digit run is never a substitute for a bad labeled token.
+    The third value is the raw token tail, kept even when the token is not loadable.
+    """
+    labeled = re.search(r"홈택스\s*승인번호\s*[:：]", memo or "")
+    if not labeled:
+        return None, False, ""
+    rest = (memo or "")[labeled.end():]
+    token_match = re.match(r"\s*([0-9A-Za-z-]+)", rest)
+    if not token_match:
+        return None, True, ""
+    token = token_match.group(1)
+    if _APPROVAL_EXACT.fullmatch(token):
+        return token, True, token[-4:]
+    return None, True, token[-4:]
+
+
+def _approval(natural_key: str, memo: str) -> tuple[str | None, str | None, str]:
+    """Return (approval, conflict_reason, tail). Never picks a winner."""
     from_key = None
     match = _INVOICE_KEY.match(natural_key.strip())
     if match:
         from_key = match.group(1)
-    from_memo = None
-    memo_match = _APPROVAL_MEMO.search(memo or "")
-    if memo_match:
-        from_memo = memo_match.group(1)
+    elif natural_key.strip().lower().startswith("invoice|"):
+        return None, "approval is not exactly 24 digits; not loaded", ""
+    from_memo, labeled, labeled_tail = _labeled_approval_token(memo or "")
+    if labeled and from_memo is None:
+        return None, "approval is not a complete 24-digit number; not loaded", labeled_tail
     if from_key and from_memo and from_key != from_memo:
-        return None, "approval in natural key and memo disagree; not fixed"
-    return from_key or from_memo, None
+        return None, "approval in natural key and memo disagree; not fixed", ""
+    return from_key or from_memo, None, (from_key or from_memo or "")[-4:]
 
 
 def _counterparty(props: Mapping[str, JsonValue]) -> str:
@@ -160,9 +182,18 @@ def map_row(row: Mapping[str, JsonValue]) -> Mapped | Hold:
         )
     if kind == "bank" and tax:
         return Hold(page_id, classification, "tax on bank-only row; not fixed", net, tax, gross)
-    approval, approval_conflict = _approval(str(props.get("자연키") or ""), str(props.get("메모") or ""))
+    approval, approval_conflict, approval_tail = _approval(str(props.get("자연키") or ""), str(props.get("메모") or ""))
     if approval_conflict:
-        return Hold(page_id, classification, approval_conflict, net, tax, gross)
+        return Hold(
+            page_id,
+            classification,
+            approval_conflict,
+            net,
+            tax,
+            gross,
+            approval_tail=approval_tail,
+            approval=approval,
+        )
     if kind == "invoice" and tax == 0:
         return Hold(
             page_id,
@@ -233,6 +264,7 @@ def apply_external_amount_conflict(
         item.tax,
         item.gross,
         approval_tail=item.approval[-4:],
+        approval=item.approval,
         counterparty=item.draft.counterparty,
         external_gross=observed[2],
     )
