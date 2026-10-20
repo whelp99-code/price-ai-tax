@@ -26,8 +26,9 @@ CLASSIFICATION: dict[
 }
 
 _DATE = re.compile(r"(20\d{2}-\d{2}-\d{2})")
-_APPROVAL_MEMO = re.compile(r"홈택스 승인번호:\s*([0-9]{8,24})")
-_INVOICE_KEY = re.compile(r"^invoice\|([0-9]{8,24})$")
+_APPROVAL_EXACT = re.compile(r"^[0-9]{24}$")
+_APPROVAL_MEMO = re.compile(r"(?<![0-9A-Za-z-])([0-9]{24})(?![0-9A-Za-z-])")
+_INVOICE_KEY = re.compile(r"^invoice\|([0-9]{24})$")
 
 SOURCE = "notion"
 
@@ -109,10 +110,14 @@ def _approval(natural_key: str, memo: str) -> tuple[str | None, str | None]:
     match = _INVOICE_KEY.match(natural_key.strip())
     if match:
         from_key = match.group(1)
+    elif natural_key.strip().lower().startswith("invoice|"):
+        return None, "approval is not exactly 24 digits; not loaded"
     from_memo = None
     memo_match = _APPROVAL_MEMO.search(memo or "")
     if memo_match:
         from_memo = memo_match.group(1)
+    elif memo and "승인번호" in memo and not _APPROVAL_EXACT.fullmatch((from_memo or "").strip()):
+        return None, "approval is not a complete 24-digit number; not loaded"
     if from_key and from_memo and from_key != from_memo:
         return None, "approval in natural key and memo disagree; not fixed"
     return from_key or from_memo, None

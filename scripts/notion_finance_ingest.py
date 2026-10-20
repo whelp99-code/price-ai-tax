@@ -99,7 +99,13 @@ def main() -> None:
     result["journals_before"] = int(journals_before)
     result["hometax_numeric"] = len(hometax)
     result["hometax_separate_non_digit"] = len(separate)
-    result["hometax_matched"] = len(hometax)
+    notion_approvals = {
+        item.approval
+        for item in (*mapped.loaded, *mapped.holds)
+        if getattr(item, "approval", None)
+    }
+    matched_approvals = set(hometax) & notion_approvals
+    result["hometax_matched"] = len(matched_approvals)
     result["hometax_separate"] = [
         {"approval_tail": item.get("approval_tail", ""), "gross": item.get("gross", ""), "reason": item.get("reason", "")}
         for item in separate

@@ -1,8 +1,9 @@
+from __future__ import annotations
+import re
 """S2 scratch path: dry-run, optional /tmp load, hometax reconciliation.
 
 Does not open the demo database or the company database.
 """
-from __future__ import annotations
 
 import csv
 import io
@@ -25,8 +26,11 @@ FORBIDDEN = {
 }
 NS = {"m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
 APPROVAL_DIGITS = 24
-CSV_NAME_MARKERS = ("매입", "buyhometax", "hometax")
+CSV_PURCHASE_NAME_MARKERS = ("매입", "buyhometax", "hometax")
+CSV_SALES_NAME_MARKERS = ("매출", "sellhometax")
 CSV_REQUIRED = ("승인번호", "합계금액", "공급가액", "세액")
+_APPROVAL_COMPACT = re.compile(r"^[0-9]{24}$")
+_KRW_EXACT = re.compile(r"^[+-]?(?:0|[1-9]\d*)(?:,\d{3})*$")
 
 
 def assert_scratch(path: Path) -> Path:
@@ -58,38 +62,44 @@ def _store_approval(
 
 
 def _exact_krw(raw: str, label: str) -> int:
-    text = raw.strip().replace(",", "").replace(" ", "")
+    text = raw.strip()
     if text in {"", "-", "+"}:
         raise SystemExit(f"hometax {label} is empty")
+    if not _KRW_EXACT.fullmatch(text):
+        raise SystemExit(f"hometax {label} is not an exact integer")
     negative = text.startswith("-")
-    if negative:
-        text = text[1:]
-    if text.startswith("+"):
-        text = text[1:]
-    if any(ch in text for ch in ".eE"):
-        raise SystemExit(f"hometax {label} is not an exact integer")
-    if not text.isdigit():
-        raise SystemExit(f"hometax {label} is not an exact integer")
-    value = int(text)
+    digits = text[1:] if text[0] in "+-" else text
+    value = int(digits.replace(",", ""))
     return -value if negative else value
 
 
-def _csv_is_hometax_purchase(path: Path, sample: bytes) -> bool:
-    """True for a named Hometax export or a file whose header is the purchase set.
-
-    Unrelated CSV files are ignored. A named candidate with a missing column
-    still fails closed inside the reader.
-    """
-    folded = path.name.casefold()
-    if any(marker in folded for marker in CSV_NAME_MARKERS):
-        return True
+def _csv_header_fields(sample: bytes) -> list[str] | None:
     if sample.startswith(b"\xef\xbb\xbf"):
         sample = sample[3:]
     try:
         header = sample.decode("utf-8-sig").splitlines()[0]
     except (UnicodeDecodeError, IndexError):
+        return None
+    return next(csv.reader(io.StringIO(header)), [])
+
+
+def _csv_is_hometax_purchase(path: Path, sample: bytes) -> bool:
+    """True for a purchase export. Shared amount columns alone are not enough
+    when the name marks a sales export.
+
+    SellHomeTax/매출 is never a purchase source, even with 승인번호/합계금액/
+    공급가액/세액. A purchase name, or an unnamed file whose header has those
+    four columns, is selected. Unrelated CSV files are ignored. A selected
+    file with a missing column fails closed.
+    """
+    folded = path.name.casefold()
+    if any(marker in folded for marker in CSV_SALES_NAME_MARKERS):
         return False
-    fields = next(csv.reader(io.StringIO(header)), [])
+    if any(marker in folded for marker in CSV_PURCHASE_NAME_MARKERS):
+        return True
+    fields = _csv_header_fields(sample)
+    if fields is None:
+        return False
     return all(name in fields for name in CSV_REQUIRED)
 
 
@@ -117,6 +127,23 @@ def _read_hometax_xlsx(path: Path, found: dict[str, tuple[int, int, int]]) -> No
         _store_approval(found, approval, amounts)
 
 
+def _separate_key(item: dict[str, str]) -> tuple[str, str, str, str, str]:
+    return (
+        item.get("approval_tail", ""),
+        item.get("net", ""),
+        item.get("tax", ""),
+        item.get("gross", ""),
+        item.get("reason", ""),
+    )
+
+
+def _append_separate(separate: list[dict[str, str]], item: dict[str, str]) -> None:
+    key = _separate_key(item)
+    if any(_separate_key(existing) == key for existing in separate):
+        return
+    separate.append(item)
+
+
 def _read_hometax_csv(path: Path, found: dict[str, tuple[int, int, int]], separate: list[dict[str, str]]) -> None:
     raw = path.read_bytes()
     if raw.startswith(b"\xef\xbb\xbf"):
@@ -130,14 +157,22 @@ def _read_hometax_csv(path: Path, found: dict[str, tuple[int, int, int]], separa
         raise SystemExit("hometax csv missing columns: " + ",".join(missing))
     for index, row in enumerate(reader, start=2):
         approval_raw = (row.get("승인번호") or "").strip()
-        if not approval_raw:
+        gross_raw = row.get("합계금액") or ""
+        net_raw = row.get("공급가액") or ""
+        tax_raw = row.get("세액") or ""
+        amount_blank = not any(part.strip() for part in (gross_raw, net_raw, tax_raw))
+        zero_placeholder = {part.strip().replace(",", "") for part in (gross_raw, net_raw, tax_raw)} <= {"", "0", "-0", "+0"}
+        if not approval_raw and (amount_blank or zero_placeholder):
             continue
+        if not approval_raw:
+            raise SystemExit(f"hometax csv row {index} has amounts but a blank approval")
         compact = approval_raw.replace("-", "").replace(" ", "")
-        gross = _exact_krw(row.get("합계금액") or "", "합계금액")
-        net = _exact_krw(row.get("공급가액") or "", "공급가액")
-        tax = _exact_krw(row.get("세액") or "", "세액")
-        if not (compact.isdigit() and len(compact) == APPROVAL_DIGITS):
-            separate.append(
+        gross = _exact_krw(gross_raw, "합계금액")
+        net = _exact_krw(net_raw, "공급가액")
+        tax = _exact_krw(tax_raw, "세액")
+        if not _APPROVAL_COMPACT.fullmatch(compact):
+            _append_separate(
+                separate,
                 {
                     "file": path.name,
                     "row": str(index),
@@ -146,7 +181,7 @@ def _read_hometax_csv(path: Path, found: dict[str, tuple[int, int, int]], separa
                     "tax": str(tax),
                     "gross": str(gross),
                     "reason": "approval is not exactly 24 digits after hyphen removal; not coerced",
-                }
+                },
             )
             continue
         _store_approval(found, compact, (net, tax, gross))
@@ -162,11 +197,17 @@ def read_hometax_purchase_sources(
 ) -> tuple[dict[str, tuple[int, int, int]], list[dict[str, str]]]:
     """Read xlsx (current dir only) and identified purchase CSV files.
 
-    A CSV is read only when its name marks a Hometax purchase export or its
-    header contains 승인번호/합계금액/공급가액/세액. Other CSV files are ignored.
+    A CSV is read only when its name marks a purchase export (매입/BuyHomeTax)
+    or its header contains 승인번호/합계금액/공급가액/세액 and the name does not
+    mark a sales export. SellHomeTax/매출 is excluded even when those four
+    columns are present. Other CSV files are ignored.
     A selected file missing one of those columns fails closed.
     Only approvals that are exactly 24 digits after hyphen removal are matched.
     Other approval values are returned individually and are not digit-coerced.
+    The same held approval+amounts from overlapping files is listed once.
+    A blank approval on a row that still has amounts fails closed. A fully
+    blank approval-and-amount row is skipped.
+    Amounts must be exact integer won, optional sign, optional thousands commas.
     Amounts are (net, tax, gross) = CSV 공급가액/세액/합계금액, including negatives.
     Identical approval+amounts across xlsx and CSV are stored once.
     """
@@ -292,6 +333,13 @@ def reconciliation(report: MapReport, hometax: dict[str, tuple[int, int, int]], 
     held_gross = sum(item.gross or 0 for item in report.holds if item.classification == "매입")
     loaded_gross = report.purchase_loaded_gross()
     verdict = purchase_match_verdict(loaded_gross, hometax_gross, report.holds)
+    separate = getattr(report, "hometax_separate", [])
+    if report.holds or separate:
+        verdict = {
+            "status": "FAIL",
+            "gap": verdict["gap"],
+            "hold_explains": verdict["hold_explains"],
+        }
     lines = [
         "| item | value | status |",
         "|---|---:|---|",

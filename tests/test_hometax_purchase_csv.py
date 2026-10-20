@@ -1,6 +1,10 @@
 """Synthetic Hometax purchase CSV/xlsx fixtures. No real company text."""
 from __future__ import annotations
 
+import contextlib
+import io
+import json
+import sys
 import importlib.util
 import zipfile
 from pathlib import Path
@@ -112,10 +116,15 @@ def test_blank_approval_skipped_zero_kept_comma_exact(tmp_path: Path):
     assert found["202601010000000000000001"] == (1000, 100, 1100)
 
 
-def test_missing_amount_column_fails_closed(tmp_path: Path):
+def test_hometax_filename_without_purchase_columns_fails_closed(tmp_path: Path):
     (tmp_path / "hometax-bad.csv").write_text("승인번호,합계금액\n1,2\n", encoding="utf-8")
     with pytest.raises(SystemExit, match="missing columns"):
         S2.read_hometax_purchase_sources(tmp_path)
+
+def test_missing_amount_column_fails_closed(tmp_path: Path):
+    (tmp_path / "bad-export.csv").write_text("승인번호,합계금액,공급가액\n1,2,3\n", encoding="utf-8")
+    found, separate = S2.read_hometax_purchase_sources(tmp_path)
+    assert found == {} and separate == []
 
 
 def test_float_text_rejected(tmp_path: Path):
@@ -275,3 +284,240 @@ def test_core_ingest_does_not_read_hometax_sources():
 
     assert not hasattr(core, "read_hometax_purchase_sources")
     assert not hasattr(core, "read_hometax_purchases")
+def test_sales_named_csv_not_summed_into_purchases(tmp_path: Path):
+    purchase = "202601010000000000000101"
+    sale = "202601010000000000000202"
+    shared = "작성일자,승인번호,합계금액,공급가액,세액\n"
+    (tmp_path / "SellHomeTax_2026.csv").write_text(
+        shared + "2026-01-01," + sale + ",99000,90000,9000\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "매출전자세금계산서.csv").write_text(
+        HEADER + _csv_row(sale, "99000", "90000", "9000"),
+        encoding="utf-8",
+    )
+    (tmp_path / "BuyHomeTax.csv").write_text(
+        HEADER + _csv_row(purchase, "1100", "1000", "100"),
+        encoding="utf-8",
+    )
+    found, separate = S2.read_hometax_purchase_sources(tmp_path)
+    assert separate == []
+    assert list(found) == [purchase]
+    assert sale not in found
+    assert sum(item[2] for item in found.values()) == 1100
+
+
+
+
+def test_held_row_blocks_pass_even_when_24_digit_partial_matches():
+    approval = "202601010000000000000099"
+    report = S2.MapReport()
+    report.hometax_separate = [
+        {
+            "file": "purchases.csv",
+            "row": "4",
+            "approval_tail": "9795",
+            "net": "10",
+            "tax": "1",
+            "gross": "11",
+            "reason": "approval is not exactly 24 digits after hyphen removal; not coerced",
+        }
+    ]
+    text = S2.reconciliation(report, {approval: (100, 10, 110)}, None)
+    assert "| hometax target vs loaded | 110 vs 0 | FAIL gap=110 |" in text
+    assert "PASS" not in text.split("hold_explains")[0]
+
+
+def test_memo_does_not_store_truncated_or_letter_approval():
+    from price.notion_finance_map import map_row
+
+    exact = "202601151234567890123456"
+    kept = map_row(
+        {
+            "sourceId": "page-exact",
+            "properties": {
+                "구분": "매입",
+                "금액": 1000,
+                "부가세": 100,
+                "합계": 1100,
+                "거래명": "synthetic | item | 2026-01-15",
+                "자연키": f"invoice|{exact}",
+                "메모": f"홈택스 승인번호: {exact}",
+                "실제 처리일": "2026-01-15",
+            },
+        }
+    )
+    assert kept.keys["hometax-approval"] == exact
+    letter = map_row(
+        {
+            "sourceId": "page-letter",
+            "properties": {
+                "구분": "매입",
+                "금액": 1000,
+                "부가세": 100,
+                "합계": 1100,
+                "거래명": "synthetic | item | 2026-01-15",
+                "자연키": "invoice|2026101541000021b0009795",
+                "메모": "홈택스 승인번호: 20261015-41000021-b0009795",
+                "실제 처리일": "2026-01-15",
+            },
+        }
+    )
+    assert letter.held
+    assert "hometax-approval" not in getattr(letter, "keys", {})
+    short = map_row(
+        {
+            "sourceId": "page-short",
+            "properties": {
+                "구분": "매입",
+                "금액": 1000,
+                "부가세": 100,
+                "합계": 1100,
+                "거래명": "synthetic | item | 2026-01-15",
+                "자연키": "bank|page-short",
+                "메모": "홈택스 승인번호: 2026011512345678",
+                "실제 처리일": "2026-01-15",
+            },
+        }
+    )
+    assert short.held
+    hyphen_only = map_row(
+        {
+            "sourceId": "page-hyphen",
+            "properties": {
+                "구분": "매입",
+                "금액": 1000,
+                "부가세": 100,
+                "합계": 1100,
+                "거래명": "synthetic | item | 2026-01-15",
+                "자연키": f"invoice|{exact}",
+                "메모": "홈택스 승인번호: 20260115-12345678-90123456",
+                "실제 처리일": "2026-01-15",
+            },
+        }
+    )
+    assert hyphen_only.held
+    assert "90123456" not in str(getattr(hyphen_only, "reason", ""))
+
+
+def test_blank_approval_with_amount_fails_empty_total_row_skipped(tmp_path: Path):
+    approval = "202601010000000000000404"
+    (tmp_path / "purchases.csv").write_text(
+        HEADER + _csv_row("", "", "", "") + _csv_row(approval, "110", "100", "10"),
+        encoding="utf-8",
+    )
+    found, separate = S2.read_hometax_purchase_sources(tmp_path)
+    assert separate == []
+    assert found[approval] == (100, 10, 110)
+    (tmp_path / "blank-amount.csv").write_text(
+        HEADER + _csv_row("", "1100", "1000", "100"),
+        encoding="utf-8",
+    )
+    with pytest.raises(SystemExit, match="blank approval"):
+        S2.read_hometax_purchase_sources(tmp_path)
+
+
+
+def test_matched_count_is_intersection_not_hometax_size(tmp_path: Path):
+    import importlib.util
+
+    approval = "202601151234567890123456"
+    other = "202601010000000000000505"
+    snapshot = {
+        "finance": [
+            {
+                "sourceId": "page-one",
+                "lastEditedTime": "2026-09-30T00:00:00.000Z",
+                "properties": {
+                    "구분": "매입",
+                    "금액": 1000,
+                    "부가세": 100,
+                    "합계": 1100,
+                    "거래명": "synthetic | item | 2026-01-15",
+                    "자연키": f"invoice|{approval}",
+                    "메모": f"홈택스 승인번호: {approval}",
+                    "실제 처리일": "2026-01-15",
+                },
+            }
+        ]
+    }
+    (tmp_path / "snap.json").write_text(__import__("json").dumps(snapshot), encoding="utf-8")
+    (tmp_path / "BuyHomeTax.csv").write_text(
+        HEADER + _csv_row(approval, "1100", "1000", "100") + _csv_row(other, "2200", "2000", "200"),
+        encoding="utf-8",
+    )
+    db = tmp_path / "scratch.sqlite3"
+    spec = importlib.util.spec_from_file_location(
+        "notion_finance_ingest_matched",
+        Path(__file__).resolve().parents[1] / "scripts" / "notion_finance_ingest.py",
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    from price.db import Database
+    from price.models import CompanyInput
+    from price.service import Service
+
+    opened = Database(db)
+    Service(opened).auth.bootstrap(CompanyInput(name="scratch-match"), "scratch-match", "scratch-secret-match")
+    buf = io.StringIO()
+    argv = sys.argv
+    sys.argv = [
+        "notion_finance_ingest",
+        "--snapshot",
+        str(tmp_path / "snap.json"),
+        "--db",
+        str(db),
+        "--hometax-dir",
+        str(tmp_path),
+    ]
+    try:
+        with contextlib.redirect_stdout(buf):
+            module.main()
+    finally:
+        sys.argv = argv
+    result = json.loads(buf.getvalue())
+    assert result["hometax_numeric"] == 2
+    assert result["hometax_matched"] == 1
+    assert result["journals"] == result["journals_before"]
+
+
+def test_overlapping_held_rows_listed_once(tmp_path: Path):
+    raw = "20261015-41000021-b0009795"
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    body = HEADER + _csv_row(raw, "384510", "349555", "34955")
+    (tmp_path / "a" / "매입.csv").write_text(body, encoding="utf-8")
+    (tmp_path / "b" / "BuyHomeTax.csv").write_text(body, encoding="utf-8")
+    found, separate = S2.read_hometax_purchase_sources(tmp_path)
+    assert found == {}
+    assert len(separate) == 1
+    assert separate[0]["approval_tail"] == "9795"
+    assert separate[0]["gross"] == "384510"
+
+
+def test_malformed_amounts_rejected_valid_comma_and_negative_kept(tmp_path: Path):
+    approval = "202601010000000000000606"
+    (tmp_path / "bad-comma.csv").write_text(
+        HEADER + _csv_row(approval, "1,00", "100", "0"),
+        encoding="utf-8",
+    )
+    with pytest.raises(SystemExit, match="exact integer"):
+        S2.read_hometax_purchase_sources(tmp_path)
+    (tmp_path / "bad-comma.csv").unlink()
+    (tmp_path / "bad-sign.csv").write_text(
+        HEADER + _csv_row(approval, "-+100", "100", "0"),
+        encoding="utf-8",
+    )
+    with pytest.raises(SystemExit, match="exact integer"):
+        S2.read_hometax_purchase_sources(tmp_path)
+    (tmp_path / "bad-sign.csv").unlink()
+    (tmp_path / "ok.csv").write_text(
+        HEADER
+        + _csv_row(approval, "-1,100", "-1,000", "-100")
+        + _csv_row("202601010000000000000607", "1,100", "1,000", "100"),
+        encoding="utf-8",
+    )
+    found, separate = S2.read_hometax_purchase_sources(tmp_path)
+    assert separate == []
+    assert found[approval] == (-1000, -100, -1100)
+    assert found["202601010000000000000607"] == (1000, 100, 1100)
