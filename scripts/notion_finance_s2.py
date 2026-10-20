@@ -10,6 +10,7 @@ import csv
 import io
 import argparse
 import json
+from datetime import date
 import secrets
 import zipfile
 import xml.etree.ElementTree as ET
@@ -18,7 +19,7 @@ from pathlib import Path
 from price.auth import Actor
 from price.db import Database, digest
 from price.models import CompanyInput
-from price.notion_finance_map import MapReport, Mapped, map_snapshot, purchase_match_verdict
+from price.notion_finance_map import MapReport, Mapped, Hold, map_snapshot, purchase_match_verdict
 from price.ingest_safety import text_decode
 from price.service import Service
 
@@ -32,6 +33,11 @@ CSV_PURCHASE_NAME_MARKERS = ("매입", "buyhometax", "hometax_purchase")
 CSV_SALES_NAME_MARKERS = ("매출", "sellhometax")
 _APPROVAL_COMPACT = re.compile(r"^[0-9]{24}$")
 _KRW_EXACT = re.compile(r"^[+-]?(?:0|[1-9]\d{0,2}(?:,\d{3})+|[1-9]\d*)$")
+_EXPORT_PERIOD = re.compile(r"_(\d{8})_(\d{8})(?:\.[^.]+)?$")
+_ISSUE_DATE = re.compile(r"(20\d{2}-\d{2}-\d{2})")
+_PERIOD_NAME = re.compile(
+    r"^(?:hometax_purchase_etax|hometax_purchase)_(\d{8})_(\d{8})\.csv$"
+)
 
 
 def assert_scratch(path: Path) -> Path:
@@ -287,6 +293,14 @@ def _matched_purchase_approvals(report: MapReport, hometax: dict[str, tuple[int,
         item.approval
         for item in (*report.loaded, *report.holds)
         if getattr(item, "classification", "") == "매입" and getattr(item, "approval", None)
+        and not (
+            getattr(item, "held", False) is True
+            and all(getattr(item, name, None) is not None for name in ("net", "tax", "gross"))
+        )
+        and (
+            any(getattr(item, name, None) is None for name in ("net", "tax", "gross"))
+            or hometax.get(item.approval) == (item.net, item.tax, item.gross)
+        )
     } & set(hometax)
 
 
@@ -395,8 +409,227 @@ def _link_approval(db: Database, company: str, item: Mapped, object_id: str) -> 
 def _purchase_hold(item) -> bool:
     return getattr(item, "classification", "") == "매입"
 
+def _calendar_stamp(raw: str, label: str) -> date:
+    if len(raw) != 8 or not raw.isdigit():
+        raise SystemExit(f"{label} is not YYYYMMDD")
+    try:
+        parsed = date(int(raw[0:4]), int(raw[4:6]), int(raw[6:8]))
+    except ValueError as exc:
+        raise SystemExit(f"{label} is not a calendar date") from exc
+    if parsed.isoformat().replace("-", "") != raw:
+        raise SystemExit(f"{label} is not a calendar date")
+    return parsed
 
-def reconciliation(report: MapReport, hometax: dict[str, tuple[int, int, int]], load: dict | None) -> str:
+
+def parse_period_arg(raw: str, label: str) -> date:
+    text = raw.strip()
+    if len(text) == 8 and text.isdigit():
+        return _calendar_stamp(text, label)
+    if len(text) == 10 and text[4] == "-" and text[7] == "-":
+        return _calendar_stamp(text.replace("-", ""), label)
+    raise SystemExit(f"{label} must be YYYY-MM-DD or YYYYMMDD")
+
+
+def period_from_export_name(name: str) -> tuple[date, date] | None:
+    """Verified purchase-export filename only. A generic dated name is not a query window."""
+    match = _PERIOD_NAME.fullmatch(name)
+    if not match:
+        return None
+    start = _calendar_stamp(match.group(1), "filename period start")
+    end = _calendar_stamp(match.group(2), "filename period end")
+    if start > end:
+        raise SystemExit("filename period start is after end")
+    return start, end
+
+
+def resolve_purchase_period(
+    directory: Path,
+    start: date | None = None,
+    end: date | None = None,
+) -> tuple[date, date]:
+    """Explicit dates, or exactly one verified export filename. Never min/max row dates."""
+    files = [
+        path
+        for path in sorted(directory.rglob("*"))
+        if path.is_file() and path.suffix.casefold() == ".csv" and _csv_is_hometax_purchase(path)
+    ]
+    named = [(path, parsed) for path in files if (parsed := period_from_export_name(path.name))]
+    if start is None and end is None:
+        if len(named) != 1:
+            raise SystemExit(
+                "purchase period missing: pass --period-start and --period-end, "
+                "or provide exactly one hometax_purchase_etax_YYYYMMDD_YYYYMMDD.csv"
+            )
+        return named[0][1]
+    if start is None or end is None:
+        raise SystemExit("period start and end must both be set")
+    if start > end:
+        raise SystemExit("period start is after end")
+    conflicts = [path.name for path, parsed in named if parsed != (start, end)]
+    if conflicts:
+        raise SystemExit("explicit period disagrees with filename period: " + ",".join(conflicts))
+    return start, end
+
+
+def purchase_period_report(
+    report: MapReport,
+    period: tuple[date, date],
+    evidence: list[dict[str, object]] | None = None,
+) -> dict[str, object]:
+    """Bucket Notion purchases by original issue date. Amount is not identity."""
+    start, end = period
+    if start > end:
+        raise SystemExit("period start is after end")
+    notion = {
+        item.approval: (item.net, item.tax, item.gross)
+        for item in (*report.loaded, *report.holds)
+        if getattr(item, "classification", "") == "매입"
+        and _APPROVAL_COMPACT.fullmatch(getattr(item, "approval", None) or "")
+        and item.net is not None
+        and item.tax is not None
+        and item.gross is not None
+    }
+    in_count = out_count = missing_count = 0
+    in_gross = out_gross = 0
+    missing_rows: list[str] = []
+    blocked = False
+    for item in (*report.loaded, *report.holds):
+        if getattr(item, "classification", "") != "매입":
+            continue
+        issued = getattr(item, "issue_date", None)
+        if not isinstance(issued, date):
+            missing_count += 1
+            blocked = True
+            missing_rows.append(
+                f"page…{tail(getattr(item, 'page_id', ''))} "
+                f"approval…{getattr(item, 'approval_tail', '') or tail(getattr(item, 'approval', '') or '')} "
+                "issue date missing or unparseable; not a snapshot timestamp"
+            )
+            continue
+        gross = item.gross or 0
+        if start <= issued <= end:
+            in_count += 1
+            in_gross += gross
+        else:
+            out_count += 1
+            out_gross += gross
+    links: list[dict[str, object]] = []
+    seen: set[str] = set()
+    for item in evidence or []:
+        approval = str(item.get("approval") or "")
+        if not _APPROVAL_COMPACT.fullmatch(approval) or approval in seen:
+            continue
+        seen.add(approval)
+        observed = notion.get(approval)
+        held = any(
+            getattr(row, "approval", None) == approval and getattr(row, "held", False)
+            for row in (*report.loaded, *report.holds)
+        )
+        gross = int(item["gross"])
+        if observed is None:
+            same = [
+                row
+                for row in (*report.loaded, *report.holds)
+                if getattr(row, "classification", "") == "매입" and row.gross == gross
+            ]
+            state = "candidate" if same else "no-evidence"
+            detail = (
+                "same gross only; not the same transaction"
+                if same
+                else "no notion approval or amount evidence"
+            )
+        elif observed == (int(item["net"]), int(item["tax"]), gross) and not held:
+            state = "match"
+            detail = "complete approval key and original amounts agree"
+        elif held and observed == (int(item["net"]), int(item["tax"]), gross):
+            state = "held-amount-agree"
+            detail = "complete approval key and original amounts agree, but the notion row is held; not a loaded match"
+        else:
+            state = "conflict"
+            detail = "complete approval key with different original amounts"
+        links.append(
+            {
+                "state": state,
+                "approval_tail": approval[-4:],
+                "gross": gross,
+                "issue_date": str(item.get("issue_date") or ""),
+                "detail": detail,
+            }
+        )
+    return {
+        "period_start": start.isoformat(),
+        "period_end": end.isoformat(),
+        "in_count": in_count,
+        "in_gross": in_gross,
+        "out_count": out_count,
+        "out_gross": out_gross,
+        "missing_issue_date_count": missing_count,
+        "missing_rows": missing_rows,
+        "blocked": blocked,
+        "links": links,
+    }
+
+
+def scope_purchase_report(report: MapReport, period: tuple[date, date]) -> MapReport:
+    """Keep non-purchases unchanged; only dated, in-window purchases may load or match."""
+    start, end = period
+
+    def included(item: Mapped | Hold) -> bool:
+        return item.classification != "매입" or (
+            isinstance(item.issue_date, date) and start <= item.issue_date <= end
+        )
+
+    scoped = MapReport(
+        loaded=[item for item in report.loaded if included(item)],
+        holds=[item for item in report.holds if included(item)],
+        hometax_separate=list(report.hometax_separate),
+    )
+    for item in (*scoped.loaded, *scoped.holds):
+        scoped.rows += 1
+        scoped.by_class[item.classification] = scoped.by_class.get(item.classification, 0) + 1
+    return scoped
+
+
+def _append_period(lines: list[str], period_report: dict[str, object] | None) -> None:
+    if not period_report:
+        lines.append("| purchase issue period |  | NOT_RUN; unscoped gross is not a period match |")
+        return
+    lines.append(
+        "| purchase issue period | "
+        + f"{period_report['period_start']}..{period_report['period_end']} inclusive | "
+        + "query window, not min/max dates |"
+    )
+    lines.append(
+        f"| notion purchases inside period | {period_report['in_count']} | gross {period_report['in_gross']} |"
+    )
+    lines.append(
+        "| notion purchases outside period | "
+        + f"{period_report['out_count']} | gross {period_report['out_gross']}; excluded from period match |"
+    )
+    lines.append(
+        "| notion purchases missing issue date | "
+        + f"{period_report['missing_issue_date_count']} | "
+        + ("FAIL; PASS blocked" if period_report["blocked"] else "none")
+    )
+    for row in period_report["missing_rows"]:
+        lines.append(f"- ISSUE_DATE_MISSING {row}")
+    for link in period_report["links"]:
+        lines.append(
+            f"- PERIOD_LINK {link['state']} approval…{link['approval_tail']} "
+            + f"gross={link['gross']} issue={link['issue_date']} {link['detail']}"
+        )
+
+def reconciliation(
+    report: MapReport,
+    hometax: dict[str, tuple[int, int, int]],
+    load: dict | None,
+    period_report: dict[str, object] | None = None,
+) -> str:
+    if period_report:
+        report = scope_purchase_report(report, (
+            date.fromisoformat(str(period_report["period_start"])),
+            date.fromisoformat(str(period_report["period_end"])),
+        ))
     hometax_gross = sum(item[2] for item in hometax.values())
     held_gross = sum(item.gross or 0 for item in report.holds if _purchase_hold(item))
     loaded_gross = report.purchase_loaded_gross()
@@ -410,7 +643,7 @@ def reconciliation(report: MapReport, hometax: dict[str, tuple[int, int, int]], 
         and _APPROVAL_COMPACT.fullmatch(getattr(item, "approval", None) or "")
         and item.approval not in hometax
     }
-    if purchase_holds or separate or unmatched:
+    if purchase_holds or separate or unmatched or (period_report and period_report.get("blocked")):
         verdict = {
             "status": "FAIL",
             "gap": verdict["gap"],
@@ -441,7 +674,11 @@ def reconciliation(report: MapReport, hometax: dict[str, tuple[int, int, int]], 
     lines.append("")
     lines.append("Holds:")
     for hold in report.holds:
-        lines.append(f"- page…{tail(hold.page_id)} {hold.classification} gross={hold.gross} approval…{hold.approval_tail} {hold.reason}")
+        lines.append(
+            f"- page…{tail(hold.page_id)} {hold.classification} gross={hold.gross} "
+            f"approval…{getattr(hold, 'approval_tail', '') or tail(getattr(hold, 'approval', '') or '')} "
+            f"{getattr(hold, 'reason', '')}"
+        )
     lines.append("")
     lines.append("Draft only. Not a filed return. Sales per-invoice files were not compared.")
     separate = getattr(report, "hometax_separate", [])
@@ -453,6 +690,14 @@ def reconciliation(report: MapReport, hometax: dict[str, tuple[int, int, int]], 
     lines.append(f"| hometax separate approvals | {len(separate)} | not coerced |")
     lines.append(f"| hometax separate gross | {separate_gross} | excluded from match target |")
     lines.append(f"| hometax all-row gross | {hometax_gross + separate_gross} | matched plus separate |")
+    if period_report:
+        notion_gross = report.purchase_notion_gross()
+        all_gross = hometax_gross + separate_gross
+        lines.append(
+            "| hometax all-row target vs period notion | "
+            + f"{all_gross} vs {notion_gross} | gap={all_gross - notion_gross}; "
+            + f"separate {separate_gross} + numeric-target-minus-notion {hometax_gross - notion_gross} |"
+        )
     for item in separate:
         lines.append(
             "- HOLD approval…"
@@ -460,6 +705,7 @@ def reconciliation(report: MapReport, hometax: dict[str, tuple[int, int, int]], 
             + f"row={item.get('row', '')} net={item.get('net', '')} "
             + f"tax={item.get('tax', '')} gross={item.get('gross', '')} {item.get('reason', '')}"
         )
+    _append_period(lines, period_report)
     return "\n".join(lines)
 
 
@@ -469,17 +715,26 @@ def main() -> None:
     parser.add_argument("--hometax-dir", type=Path, required=True)
     parser.add_argument("--load", type=Path)
     parser.add_argument("--report", type=Path)
+    parser.add_argument("--period-start")
+    parser.add_argument("--period-end")
     args = parser.parse_args()
     payload = json.loads(args.snapshot.read_text())
     hometax, separate = read_hometax_purchase_sources(args.hometax_dir)
     report = map_snapshot(payload["finance"], hometax)
     report.hometax_separate = separate
+    period = resolve_purchase_period(
+        args.hometax_dir,
+        parse_period_arg(args.period_start, "period start") if args.period_start else None,
+        parse_period_arg(args.period_end, "period end") if args.period_end else None,
+    )
+    period_report = purchase_period_report(report, period)
+    report = scope_purchase_report(report, period)
     text = dry_run_text(report, hometax)
     print(text)
     load = load_twice(args.load, report) if args.load else None
     if load:
         print(json.dumps({k: v for k, v in load.items()}, ensure_ascii=False))
-    table = reconciliation(report, hometax, load)
+    table = reconciliation(report, hometax, load, period_report)
     print(table)
     if args.report:
         args.report.parent.mkdir(parents=True, exist_ok=True)
