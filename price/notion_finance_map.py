@@ -27,7 +27,6 @@ CLASSIFICATION: dict[
 
 _DATE = re.compile(r"(20\d{2}-\d{2}-\d{2})")
 _APPROVAL_EXACT = re.compile(r"^[0-9]{24}$")
-_APPROVAL_MEMO = re.compile(r"(?<![0-9A-Za-z-])([0-9]{24})(?![0-9A-Za-z-])")
 _INVOICE_KEY = re.compile(r"^invoice\|([0-9]{24})$")
 
 SOURCE = "notion"
@@ -74,6 +73,7 @@ class MapReport:
     by_class: dict[str, int] = field(default_factory=dict)
     loaded: list[Mapped] = field(default_factory=list)
     holds: list[Hold] = field(default_factory=list)
+    hometax_separate: list[dict[str, str]] = field(default_factory=list)
 
     def purchase_notion_gross(self) -> int:
         total = 0
@@ -104,6 +104,24 @@ def _date_from(*texts: str | None) -> date | None:
     return None
 
 
+def _labeled_approval_token(memo: str) -> tuple[str | None, bool]:
+    """Return the token immediately after an explicit Hometax approval label.
+
+    A later bare 24-digit run is never a substitute for a bad labeled token.
+    """
+    labeled = re.search(r"홈택스\s*승인번호\s*[:：]", memo or "")
+    if not labeled:
+        return None, False
+    rest = (memo or "")[labeled.end():]
+    token_match = re.match(r"\s*([0-9A-Za-z-]+)", rest)
+    if not token_match:
+        return None, True
+    token = token_match.group(1)
+    if _APPROVAL_EXACT.fullmatch(token):
+        return token, True
+    return None, True
+
+
 def _approval(natural_key: str, memo: str) -> tuple[str | None, str | None]:
     """Return (approval, conflict_reason). Never picks a winner."""
     from_key = None
@@ -112,11 +130,8 @@ def _approval(natural_key: str, memo: str) -> tuple[str | None, str | None]:
         from_key = match.group(1)
     elif natural_key.strip().lower().startswith("invoice|"):
         return None, "approval is not exactly 24 digits; not loaded"
-    from_memo = None
-    memo_match = _APPROVAL_MEMO.search(memo or "")
-    if memo_match:
-        from_memo = memo_match.group(1)
-    elif memo and "승인번호" in memo and not _APPROVAL_EXACT.fullmatch((from_memo or "").strip()):
+    from_memo, labeled = _labeled_approval_token(memo or "")
+    if labeled and from_memo is None:
         return None, "approval is not a complete 24-digit number; not loaded"
     if from_key and from_memo and from_key != from_memo:
         return None, "approval in natural key and memo disagree; not fixed"

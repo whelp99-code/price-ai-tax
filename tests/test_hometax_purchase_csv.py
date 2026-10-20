@@ -74,7 +74,7 @@ def test_hyphen_stripped_24_digit_matches_notion_key(tmp_path: Path):
     approval = "202601151234567890123456"
     raw = "20260115-12345678-90123456"
     (tmp_path / "nested").mkdir()
-    (tmp_path / "nested" / "purchases.csv").write_text(
+    (tmp_path / "nested" / "hometax_purchase.csv").write_text(
         "\ufeff" + HEADER + _csv_row(raw, "1,100", "1,000", "100"),
         encoding="utf-8",
     )
@@ -109,17 +109,24 @@ def test_blank_approval_skipped_zero_kept_comma_exact(tmp_path: Path):
         + _csv_row("202601010000000000000000", "0", "0", "0")
         + _csv_row("202601010000000000000001", "1,100", "1,000", "100")
     )
-    (tmp_path / "purchases.csv").write_text(body, encoding="utf-8")
+    (tmp_path / "hometax_purchase.csv").write_text(body, encoding="utf-8")
     found, separate = S2.read_hometax_purchase_sources(tmp_path)
     assert separate == []
     assert found["202601010000000000000000"] == (0, 0, 0)
     assert found["202601010000000000000001"] == (1000, 100, 1100)
 
 
-def test_hometax_filename_without_purchase_columns_fails_closed(tmp_path: Path):
+def test_generic_hometax_name_is_not_a_purchase_source(tmp_path: Path):
+    sale = "202601010000000000000202"
+    shared = "작성일자,승인번호,합계금액,공급가액,세액\n"
     (tmp_path / "hometax-bad.csv").write_text("승인번호,합계금액\n1,2\n", encoding="utf-8")
-    with pytest.raises(SystemExit, match="missing columns"):
-        S2.read_hometax_purchase_sources(tmp_path)
+    (tmp_path / "hometax_sales.csv").write_text(
+        shared + "2026-01-01," + sale + ",99000,90000,9000\n",
+        encoding="utf-8",
+    )
+    found, separate = S2.read_hometax_purchase_sources(tmp_path)
+    assert found == {} and separate == []
+    assert sale not in found
 
 def test_missing_amount_column_fails_closed(tmp_path: Path):
     (tmp_path / "bad-export.csv").write_text("승인번호,합계금액,공급가액\n1,2,3\n", encoding="utf-8")
@@ -128,7 +135,7 @@ def test_missing_amount_column_fails_closed(tmp_path: Path):
 
 
 def test_float_text_rejected(tmp_path: Path):
-    (tmp_path / "bad.csv").write_text(
+    (tmp_path / "매입-bad.csv").write_text(
         HEADER + _csv_row("202601010000000000000009", "1100.0", "1000", "100"),
         encoding="utf-8",
     )
@@ -137,7 +144,7 @@ def test_float_text_rejected(tmp_path: Path):
 
 
 def test_empty_amount_fails_closed(tmp_path: Path):
-    (tmp_path / "empty.csv").write_text(
+    (tmp_path / "매입-empty.csv").write_text(
         HEADER + _csv_row("202601010000000000000008", "", "1000", "100"),
         encoding="utf-8",
     )
@@ -149,7 +156,7 @@ def test_xlsx_and_csv_same_approval_not_double_counted(tmp_path: Path):
     approval = "202601151234567890123456"
     _xlsx(tmp_path / "TAX_demo_BuyHomeTax.xlsx", [(approval, "1000", "100", "1100")])
     (tmp_path / "child").mkdir()
-    (tmp_path / "child" / "same.csv").write_text(
+    (tmp_path / "child" / "hometax_purchase_same.csv").write_text(
         HEADER + _csv_row("20260115-12345678-90123456", "1100", "1000", "100"),
         encoding="utf-8",
     )
@@ -163,7 +170,7 @@ def test_xlsx_and_csv_same_approval_not_double_counted(tmp_path: Path):
 def test_xlsx_csv_amount_clash_fails(tmp_path: Path):
     approval = "202601151234567890123456"
     _xlsx(tmp_path / "TAX_demo_BuyHomeTax.xlsx", [(approval, "1000", "100", "1100")])
-    (tmp_path / "other.csv").write_text(
+    (tmp_path / "hometax_purchase_other.csv").write_text(
         HEADER + _csv_row(approval, "2200", "2000", "200"),
         encoding="utf-8",
     )
@@ -206,7 +213,7 @@ def test_notion_match_uses_stripped_key():
 
 def test_negative_amended_amounts_preserved(tmp_path: Path):
     approval = "202601010000000000000077"
-    (tmp_path / "purchases.csv").write_text(
+    (tmp_path / "hometax_purchase.csv").write_text(
         HEADER + _csv_row(approval, "-1,100", "-1,000", "-100"),
         encoding="utf-8",
     )
@@ -244,7 +251,7 @@ def test_unrelated_csv_ignored_named_missing_column_fails(tmp_path: Path):
     (tmp_path / "notes.csv").write_text("memo\nnot a tax file\n", encoding="utf-8")
     found, separate = S2.read_hometax_purchase_sources(tmp_path)
     assert found == {} and separate == []
-    (tmp_path / "ok.csv").write_text(HEADER + _csv_row(approval, "110", "100", "10"), encoding="utf-8")
+    (tmp_path / "hometax_purchase_ok.csv").write_text(HEADER + _csv_row(approval, "110", "100", "10"), encoding="utf-8")
     found, separate = S2.read_hometax_purchase_sources(tmp_path)
     assert separate == []
     assert found[approval] == (100, 10, 110)
@@ -402,14 +409,14 @@ def test_memo_does_not_store_truncated_or_letter_approval():
 
 def test_blank_approval_with_amount_fails_empty_total_row_skipped(tmp_path: Path):
     approval = "202601010000000000000404"
-    (tmp_path / "purchases.csv").write_text(
+    (tmp_path / "hometax_purchase.csv").write_text(
         HEADER + _csv_row("", "", "", "") + _csv_row(approval, "110", "100", "10"),
         encoding="utf-8",
     )
     found, separate = S2.read_hometax_purchase_sources(tmp_path)
     assert separate == []
     assert found[approval] == (100, 10, 110)
-    (tmp_path / "blank-amount.csv").write_text(
+    (tmp_path / "매입-blank-amount.csv").write_text(
         HEADER + _csv_row("", "1100", "1000", "100"),
         encoding="utf-8",
     )
@@ -497,21 +504,21 @@ def test_overlapping_held_rows_listed_once(tmp_path: Path):
 
 def test_malformed_amounts_rejected_valid_comma_and_negative_kept(tmp_path: Path):
     approval = "202601010000000000000606"
-    (tmp_path / "bad-comma.csv").write_text(
+    (tmp_path / "매입-bad-comma.csv").write_text(
         HEADER + _csv_row(approval, "1,00", "100", "0"),
         encoding="utf-8",
     )
     with pytest.raises(SystemExit, match="exact integer"):
         S2.read_hometax_purchase_sources(tmp_path)
-    (tmp_path / "bad-comma.csv").unlink()
-    (tmp_path / "bad-sign.csv").write_text(
+    (tmp_path / "매입-bad-comma.csv").unlink()
+    (tmp_path / "매입-bad-sign.csv").write_text(
         HEADER + _csv_row(approval, "-+100", "100", "0"),
         encoding="utf-8",
     )
     with pytest.raises(SystemExit, match="exact integer"):
         S2.read_hometax_purchase_sources(tmp_path)
-    (tmp_path / "bad-sign.csv").unlink()
-    (tmp_path / "ok.csv").write_text(
+    (tmp_path / "매입-bad-sign.csv").unlink()
+    (tmp_path / "hometax_purchase_ok.csv").write_text(
         HEADER
         + _csv_row(approval, "-1,100", "-1,000", "-100")
         + _csv_row("202601010000000000000607", "1,100", "1,000", "100"),
@@ -521,3 +528,221 @@ def test_malformed_amounts_rejected_valid_comma_and_negative_kept(tmp_path: Path
     assert separate == []
     assert found[approval] == (-1000, -100, -1100)
     assert found["202601010000000000000607"] == (1000, 100, 1100)
+
+def test_map_report_declares_separate_and_reconciliation_uses_it():
+    report = S2.MapReport()
+    assert "hometax_separate" in report.__dataclass_fields__
+    approval = "202601010000000000000099"
+    report.hometax_separate = [
+        {
+            "file": "BuyHomeTax.csv",
+            "row": "2",
+            "approval_tail": "9795",
+            "net": "10",
+            "tax": "1",
+            "gross": "11",
+            "reason": "approval is not exactly 24 digits after hyphen removal; not coerced",
+        }
+    ]
+    text = S2.reconciliation(report, {approval: (100, 10, 110)}, None)
+    assert "| hometax target vs loaded | 110 vs 0 | FAIL gap=110 |" in text
+    assert "PASS" not in text.split("hold_explains")[0]
+
+def test_unmarked_shared_columns_and_generic_hometax_are_rejected(tmp_path: Path):
+    sale = "202601010000000000000303"
+    shared = "작성일자,승인번호,합계금액,공급가액,세액\n"
+    row = "2026-01-01," + sale + ",99000,90000,9000\n"
+    (tmp_path / "export.csv").write_text(shared + row, encoding="utf-8")
+    (tmp_path / "hometax.csv").write_text(shared + row, encoding="utf-8")
+    (tmp_path / "hometax_etax.csv").write_text(shared + row, encoding="utf-8")
+    found, separate = S2.read_hometax_purchase_sources(tmp_path)
+    assert found == {} and separate == []
+    (tmp_path / "hometax_purchase_etax_demo.csv").write_text(
+        HEADER + _csv_row("202601010000000000000304", "1100", "1000", "100"),
+        encoding="utf-8",
+    )
+    found, separate = S2.read_hometax_purchase_sources(tmp_path)
+    assert separate == []
+    assert found["202601010000000000000304"] == (1000, 100, 1100)
+    assert sale not in found
+
+
+def test_same_tail_different_approvals_stay_separate(tmp_path: Path):
+    left = "20261015-41000021-b0009795"
+    right = "20261016-41000022-c0009795"
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    (tmp_path / "a" / "매입.csv").write_text(
+        HEADER + _csv_row(left, "11", "10", "1"),
+        encoding="utf-8",
+    )
+    (tmp_path / "b" / "BuyHomeTax.csv").write_text(
+        HEADER + _csv_row(right, "11", "10", "1"),
+        encoding="utf-8",
+    )
+    found, separate = S2.read_hometax_purchase_sources(tmp_path)
+    assert found == {}
+    assert len(separate) == 2
+    assert separate[0]["approval_tail"] == separate[1]["approval_tail"] == "9795"
+    assert separate[0]["approval_id"] != separate[1]["approval_id"]
+    assert "approval_raw" not in separate[0]
+    assert len(separate[0]["approval_id"]) == 64
+
+
+def test_same_normalized_approval_across_files_listed_once(tmp_path: Path):
+    raw = "20261015-41000021-b0009795"
+    spaced = "20261015 41000021 b0009795"
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    (tmp_path / "a" / "매입.csv").write_text(HEADER + _csv_row(raw, "11", "10", "1"), encoding="utf-8")
+    (tmp_path / "b" / "BuyHomeTax.csv").write_text(HEADER + _csv_row(spaced, "11", "10", "1"), encoding="utf-8")
+    found, separate = S2.read_hometax_purchase_sources(tmp_path)
+    assert found == {}
+    assert len(separate) == 1
+    assert separate[0]["approval_tail"] == "9795"
+
+
+def test_grouped_thousands_accepted_and_irregular_comma_rejected(tmp_path: Path):
+    approval = "202601010000000000000808"
+    (tmp_path / "매입-grouped.csv").write_text(
+        HEADER + _csv_row(approval, "1,234,567", "1,122,334", "112,233"),
+        encoding="utf-8",
+    )
+    found, separate = S2.read_hometax_purchase_sources(tmp_path)
+    assert separate == []
+    assert found[approval] == (1122334, 112233, 1234567)
+    (tmp_path / "매입-grouped.csv").unlink()
+    (tmp_path / "매입-bad-group.csv").write_text(
+        HEADER + _csv_row(approval, "1234,567", "100", "0"),
+        encoding="utf-8",
+    )
+    with pytest.raises(SystemExit, match="exact integer"):
+        S2.read_hometax_purchase_sources(tmp_path)
+
+
+def test_blank_approval_zero_comma_placeholder_does_not_bypass(tmp_path: Path):
+    (tmp_path / "매입-zero.csv").write_text(
+        HEADER + _csv_row("", "0,00", "0", "0"),
+        encoding="utf-8",
+    )
+    with pytest.raises(SystemExit, match="exact integer"):
+        S2.read_hometax_purchase_sources(tmp_path)
+    (tmp_path / "매입-zero.csv").unlink()
+    (tmp_path / "매입-zero-ok.csv").write_text(
+        HEADER + _csv_row("", "0", "+0", "-0"),
+        encoding="utf-8",
+    )
+    found, separate = S2.read_hometax_purchase_sources(tmp_path)
+    assert found == {} and separate == []
+    (tmp_path / "매입-zero-ok.csv").unlink()
+    (tmp_path / "매입-zero-comma.csv").write_text(
+        HEADER + _csv_row("", "0,000", "0", "0"),
+        encoding="utf-8",
+    )
+    with pytest.raises(SystemExit, match="exact integer"):
+        S2.read_hometax_purchase_sources(tmp_path)
+
+
+def test_labeled_bad_token_does_not_fall_through_to_later_digits():
+    from price.notion_finance_map import map_row
+
+    exact = "202601151234567890123456"
+    other = "202601019999999999999999"
+    held = map_row(
+        {
+            "sourceId": "page-bad-label",
+            "properties": {
+                "구분": "매입",
+                "금액": 1000,
+                "부가세": 100,
+                "합계": 1100,
+                "거래명": "synthetic | item | 2026-01-15",
+                "자연키": "bank|page-bad-label",
+                "메모": f"홈택스 승인번호: 20261015-41000021-b0009795 later {other}",
+                "실제 처리일": "2026-01-15",
+            },
+        }
+    )
+    assert held.held
+    assert "hometax-approval" not in getattr(held, "keys", {})
+    assert other not in str(getattr(held, "reason", ""))
+    bare = map_row(
+        {
+            "sourceId": "page-bare",
+            "properties": {
+                "구분": "매입",
+                "금액": 1000,
+                "부가세": 100,
+                "합계": 1100,
+                "거래명": "synthetic | item | 2026-01-15",
+                "자연키": "bank|page-bare",
+                "메모": f"reference {exact}",
+                "실제 처리일": "2026-01-15",
+            },
+        }
+    )
+    assert "hometax-approval" not in getattr(bare, "keys", {})
+    kept = map_row(
+        {
+            "sourceId": "page-kept-label",
+            "properties": {
+                "구분": "매입",
+                "금액": 1000,
+                "부가세": 100,
+                "합계": 1100,
+                "거래명": "synthetic | item | 2026-01-15",
+                "자연키": "bank|page-kept-label",
+                "메모": f"홈택스 승인번호: {exact}",
+                "실제 처리일": "2026-01-15",
+            },
+        }
+    )
+    assert kept.keys["hometax-approval"] == exact
+
+
+def test_operational_reconciliation_receives_separate_and_blocks_pass(tmp_path: Path):
+    import importlib.util
+
+    approval = "202601151234567890123456"
+    held = "20261015-41000021-b0009795"
+    snapshot = {
+        "finance": [
+            {
+                "sourceId": "page-op",
+                "lastEditedTime": "2026-09-30T00:00:00.000Z",
+                "properties": {
+                    "구분": "매입",
+                    "금액": 1000,
+                    "부가세": 100,
+                    "합계": 1100,
+                    "거래명": "synthetic | item | 2026-01-15",
+                    "자연키": f"invoice|{approval}",
+                    "메모": f"홈택스 승인번호: {approval}",
+                    "실제 처리일": "2026-01-15",
+                },
+            }
+        ]
+    }
+    (tmp_path / "snap.json").write_text(json.dumps(snapshot), encoding="utf-8")
+    (tmp_path / "BuyHomeTax.csv").write_text(
+        HEADER + _csv_row(approval, "1100", "1000", "100") + _csv_row(held, "11", "10", "1"),
+        encoding="utf-8",
+    )
+    spec = importlib.util.spec_from_file_location(
+        "notion_finance_s2_operational",
+        Path(__file__).resolve().parents[1] / "scripts" / "notion_finance_s2.py",
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    report = module.map_snapshot(snapshot["finance"], {})
+    assert not hasattr(type(report), "__getattr__") or "hometax_separate" in report.__dataclass_fields__
+    report.hometax_separate = []
+    clean = module.reconciliation(report, {approval: (1000, 100, 1100)}, None)
+    assert "| hometax target vs loaded | 1100 vs 1100 | PASS gap=0 |" in clean
+    hometax, separate = module.read_hometax_purchase_sources(tmp_path)
+    operated = module.map_snapshot(snapshot["finance"], hometax)
+    operated.hometax_separate = separate
+    text = module.reconciliation(operated, hometax, None)
+    assert separate
+    assert "| hometax target vs loaded | 1100 vs 1100 | FAIL gap=0 |" in text
+    assert "PASS" not in text.split("hold_explains")[0]
