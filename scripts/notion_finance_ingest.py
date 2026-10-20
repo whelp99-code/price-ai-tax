@@ -96,18 +96,14 @@ def main() -> None:
     args = parser.parse_args()
     db_path = refuse_demo(args.db)
     backup_path = None
-    if args.backup_dir:
-        backup_path = backup_sqlite(db_path, args.backup_dir)
     payload = json.loads(args.snapshot.read_text())
     finance = payload["finance"]
     if args.hometax_dir:
-        period = None
-        if args.period_start or args.period_end:
-            period = resolve_purchase_period(
-                args.hometax_dir,
-                parse_period_arg(args.period_start, "period start") if args.period_start else None,
-                parse_period_arg(args.period_end, "period end") if args.period_end else None,
-            )
+        period = resolve_purchase_period(
+            args.hometax_dir,
+            parse_period_arg(args.period_start, "period start") if args.period_start else None,
+            parse_period_arg(args.period_end, "period end") if args.period_end else None,
+        )
         hometax, separate = read_hometax_purchase_sources(args.hometax_dir, period)
     else:
         if args.period_start or args.period_end:
@@ -118,6 +114,8 @@ def main() -> None:
     period_report = purchase_period_report(mapped, period) if period is not None else None
     if period_report is not None and period_report["blocked"]:
         raise SystemExit("purchase issue date missing; period match blocked")
+    if args.backup_dir:
+        backup_path = backup_sqlite(db_path, args.backup_dir)
     db = Database(db_path)
     with db.connect() as c:
         journals_before = c.execute("SELECT count(*) FROM objects WHERE kind='journal'").fetchone()[0]

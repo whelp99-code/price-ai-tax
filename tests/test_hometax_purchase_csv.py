@@ -483,7 +483,7 @@ def test_matched_count_is_intersection_not_hometax_size(tmp_path: Path):
         ]
     }
     (tmp_path / "snap.json").write_text(__import__("json").dumps(snapshot), encoding="utf-8")
-    (tmp_path / "BuyHomeTax.csv").write_text(
+    (tmp_path / "hometax_purchase_etax_20260101_20260131.csv").write_text(
         HEADER + _csv_row(approval, "1100", "1000", "100") + _csv_row(other, "2200", "2000", "200"),
         encoding="utf-8",
     )
@@ -519,6 +519,8 @@ def test_matched_count_is_intersection_not_hometax_size(tmp_path: Path):
     result = json.loads(buf.getvalue())
     assert result["hometax_numeric"] == 2
     assert result["hometax_matched"] == 1
+    assert result["purchase_period"]["start"] == "2026-01-01"
+    assert result["purchase_period"]["end"] == "2026-01-31"
     assert result["journals"] == result["journals_before"]
 
 
@@ -888,7 +890,7 @@ def test_ingest_matched_ignores_non_purchase_approvals(tmp_path: Path):
         ]
     }
     (tmp_path / "snap.json").write_text(json.dumps(snapshot), encoding="utf-8")
-    (tmp_path / "BuyHomeTax.csv").write_text(
+    (tmp_path / "hometax_purchase_etax_20260101_20260131.csv").write_text(
         HEADER + _csv_row(sale, "99000", "90000", "9000") + _csv_row(purchase, "1100", "1000", "100"),
         encoding="utf-8",
     )
