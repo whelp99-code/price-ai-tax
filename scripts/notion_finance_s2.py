@@ -63,6 +63,13 @@ def _store_approval(
     found[approval] = amounts
 
 
+def _try_exact_krw(raw: str) -> int | None:
+    try:
+        return _exact_krw(raw, "금액")
+    except SystemExit:
+        return None
+
+
 def _exact_krw(raw: str, label: str) -> int:
     text = raw.strip()
     if text in {"", "-", "+"}:
@@ -155,15 +162,28 @@ def _read_hometax_xlsx(
         approval = cols.get(2, "").strip()
         if not approval:
             continue
-        net = int(cols[9])
-        tax = int(cols[10])
-        gross = int(cols[11])
-        if net + tax != gross:
-            raise SystemExit(f"hometax xlsx row {row_no} supply+tax!=gross")
+        net_raw = cols.get(9, "")
+        tax_raw = cols.get(10, "")
+        gross_raw = cols.get(11, "")
         compact = approval.replace("-", "").replace(" ", "")
-        if not _APPROVAL_COMPACT.fullmatch(compact):
+        exact_approval = bool(_APPROVAL_COMPACT.fullmatch(compact))
+        net = _try_exact_krw(net_raw)
+        tax = _try_exact_krw(tax_raw)
+        gross = _try_exact_krw(gross_raw)
+        amounts_exact = net is not None and tax is not None and gross is not None
+        if not exact_approval:
+            if not amounts_exact:
+                continue
+            assert net is not None and tax is not None and gross is not None
+            if net + tax != gross:
+                raise SystemExit(f"hometax xlsx row {row_no} supply+tax!=gross")
             _separate_non_digit_approval(path, str(row_no), approval, net, tax, gross, separate)
             continue
+        if not amounts_exact:
+            raise SystemExit(f"hometax xlsx row {row_no} amount is not an exact integer")
+        assert net is not None and tax is not None and gross is not None
+        if net + tax != gross:
+            raise SystemExit(f"hometax xlsx row {row_no} supply+tax!=gross")
         _store_approval(found, compact, (net, tax, gross))
 
 
@@ -239,13 +259,14 @@ def read_hometax_purchase_sources(
     amount columns are not enough. SellHomeTax/매출 is excluded.
     A selected file missing one of 승인번호/합계금액/공급가액/세액 fails closed.
     Only approvals that are exactly 24 digits after hyphen removal are matched.
-    8-23 digit and other non-24 values are returned individually and are not
-    digit-coerced, for both CSV and XLSX. The same held approval+amounts
-    from overlapping files is listed once.
-    A blank approval on a row that still has amounts fails closed. A fully
-    blank approval-and-amount row is skipped.
-    Amounts must be exact integer won, optional sign, optional thousands commas.
-    A row whose 공급가액+세액 does not equal 합계금액 fails closed. Negatives stay.
+    Non-24 approvals are held individually, never digit-coerced. XLSX rows
+    with a blank approval are skipped; non-24 XLSX rows with non-integer
+    amounts (including headers) are skipped. CSV amounts must be integers,
+    and a blank CSV approval with nonzero amounts fails closed.
+    A 24-digit approval with a blank or non-integer amount fails closed.
+    Every parsed amount tuple must satisfy 공급가액+세액=합계금액.
+    The same held approval+amounts from overlapping files is listed once.
+    Negatives stay.
     Amounts are (net, tax, gross) = CSV 공급가액/세액/합계금액.
     UTF-8/CP949 decoding reuses price.ingest_safety.text_decode for the whole file.
     Identical approval+amounts across xlsx and CSV are stored once.

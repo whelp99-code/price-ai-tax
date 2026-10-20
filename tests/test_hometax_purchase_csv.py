@@ -26,6 +26,40 @@ def _load():
 S2 = _load()
 
 
+def _xlsx_with_header(path: Path, rows: list[tuple[str, str, str, str]]) -> None:
+    """Row 1 is the real export header. Data starts at row 2."""
+    strings: list[str] = []
+    index_of: dict[str, int] = {}
+
+    def sid(value: str) -> int:
+        if value not in index_of:
+            index_of[value] = len(strings)
+            strings.append(value)
+        return index_of[value]
+
+    cells = []
+    header = {2: "승인번호", 9: "공급가액", 10: "세액", 11: "합계금액"}
+    for col, value in header.items():
+        letter = chr(64 + col)
+        cells.append(f'<c r="{letter}1" t="s"><v>{sid(value)}</v></c>')
+    for row_no, (approval, net, tax, gross) in enumerate(rows, start=2):
+        for col, value in ((2, approval), (9, net), (10, tax), (11, gross)):
+            letter = chr(64 + col)
+            cells.append(f'<c r="{letter}{row_no}" t="s"><v>{sid(value)}</v></c>')
+    shared = "".join(f"<si><t>{escape(item)}</t></si>" for item in strings)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(path, "w") as book:
+        book.writestr(
+            "xl/sharedStrings.xml",
+            f'<?xml version="1.0" encoding="UTF-8"?><sst xmlns="{NS}">{shared}</sst>',
+        )
+        book.writestr(
+            "xl/worksheets/sheet1.xml",
+            f'<?xml version="1.0" encoding="UTF-8"?>'
+            f'<worksheet xmlns="{NS}"><sheetData>{"".join(cells)}</sheetData></worksheet>',
+        )
+
+
 def _xlsx(path: Path, rows: list[tuple[str, str, str, str]]) -> None:
     """Minimal shared-string sheet. B approval, I/J/K = net/tax/gross."""
     strings: list[str] = []
@@ -897,3 +931,43 @@ def test_reconciliation_empty_purchase_intersection_reports_zero():
     text = S2.reconciliation(report, {"123456789012345678901234": (100, 10, 110)}, None)
     assert "| hometax matched approvals | 0 | purchase intersection only |" in text
     assert "| hometax matched gross | 0 | purchase intersection only |" in text
+
+def test_header_xlsx_keeps_csv_and_skips_or_holds_by_approval(tmp_path: Path):
+    exact = "202601010000000000000024"
+    negative = "202601010000000000000025"
+    short_bad = "12345678"
+    short_hold = "87654321"
+    _xlsx_with_header(
+        tmp_path / "TAX_header_BuyHomeTax.xlsx",
+        [
+            (exact, "1000", "100", "1100"),
+            (short_bad, "10.5", "1", "11"),
+            (short_hold, "20", "2", "22"),
+            (negative, "-1,000", "-100", "-1,100"),
+        ],
+    )
+    bad24 = "202601010000000000000026"
+    _xlsx(tmp_path / "TAX_bad24_BuyHomeTax.xlsx", [(bad24, "10.5", "1", "11")])
+    with pytest.raises(SystemExit, match="exact integer"):
+        S2.read_hometax_purchase_sources(tmp_path)
+    (tmp_path / "TAX_bad24_BuyHomeTax.xlsx").unlink()
+    csv_exact = "202601010000000000000027"
+    (tmp_path / "hometax_purchase.csv").write_text(
+        HEADER + _csv_row(csv_exact, "3300", "3000", "300"),
+        encoding="utf-8",
+    )
+    found, separate = S2.read_hometax_purchase_sources(tmp_path)
+    assert found[exact] == (1000, 100, 1100)
+    assert found[negative] == (-1000, -100, -1100)
+    assert found[csv_exact] == (3000, 300, 3300)
+    assert short_bad not in found
+    assert short_hold not in found
+    assert [item["approval_tail"] for item in separate] == ["4321"]
+    assert separate[0]["gross"] == "22"
+    assert sum(item[0] for item in found.values()) + sum(int(item["net"]) for item in separate) == 3020
+
+
+def test_short_xlsx_approval_with_inconsistent_integer_amounts_fails(tmp_path: Path):
+    _xlsx_with_header(tmp_path / "TAX_bad_BuyHomeTax.xlsx", [("12345678", "100", "10", "999")])
+    with pytest.raises(SystemExit, match="supply\\+tax!=gross"):
+        S2.read_hometax_purchase_sources(tmp_path)
