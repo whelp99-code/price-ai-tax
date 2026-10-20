@@ -1105,3 +1105,42 @@ def test_hold_missing_or_bool_amounts_are_not_matched_by_approval():
     text = S2.reconciliation(S2.MapReport(holds=[missing]), hometax, None)
     assert "| hometax matched approvals | 0 |" in text
     assert "| hometax matched gross | 0 |" in text
+
+def test_held_approval_amount_clash_is_rejected_not_summed(tmp_path: Path):
+    same = "20261015-41000021-b0009795"
+    other = "20261016-41000022-c0009795"
+    negative = "20261017-41000023-d0009795"
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    (tmp_path / "a" / "매입.csv").write_text(
+        HEADER + _csv_row(same, "384510", "349555", "34955"),
+        encoding="utf-8",
+    )
+    (tmp_path / "b" / "BuyHomeTax.csv").write_text(
+        HEADER + _csv_row(same, "1100", "1000", "100"),
+        encoding="utf-8",
+    )
+    with pytest.raises(SystemExit, match="duplicate hometax approval"):
+        S2.read_hometax_purchase_sources(tmp_path)
+    (tmp_path / "b" / "BuyHomeTax.csv").write_text(
+        HEADER + _csv_row(same.upper(), "1100", "1000", "100"),
+        encoding="utf-8",
+    )
+    with pytest.raises(SystemExit, match="duplicate hometax approval"):
+        S2.read_hometax_purchase_sources(tmp_path)
+    (tmp_path / "b" / "BuyHomeTax.csv").write_text(
+        HEADER
+        + _csv_row(same, "384510", "349555", "34955")
+        + _csv_row(other, "1100", "1000", "100")
+        + _csv_row(negative, "-384510", "-349555", "-34955"),
+        encoding="utf-8",
+    )
+    found, separate = S2.read_hometax_purchase_sources(tmp_path)
+    assert found == {}
+    assert len(separate) == 3
+    by_id = {item["approval_id"]: item for item in separate}
+    assert len(by_id) == 3
+    assert by_id[S2._approval_identity(same)]["gross"] == "384510"
+    assert by_id[S2._approval_identity(other)]["gross"] == "1100"
+    assert by_id[S2._approval_identity(negative)]["gross"] == "-384510"
+    assert by_id[S2._approval_identity(same)]["approval_tail"] == by_id[S2._approval_identity(other)]["approval_tail"]

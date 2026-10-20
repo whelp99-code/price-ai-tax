@@ -241,3 +241,14 @@ def test_explicit_period_rejects_extra_purchase_files_before_merge(tmp_path: Pat
     assert found[OUTSIDE] == (2000, 200, 2200)
     assert separate == []
     assert unrelated.read_text(encoding="utf-8").startswith("memo")
+
+def test_period_filename_ignores_extension_and_name_case(tmp_path: Path):
+    name = "Hometax_Purchase_Etax_20260901_20261020.CSV"
+    (tmp_path / name).write_text(HEADER + _csv_row(INSIDE, "1100", "1000", "100"), encoding="utf-8")
+    assert S2.period_from_export_name(name) == (START, END)
+    assert S2.resolve_purchase_period(tmp_path) == (START, END)
+    found, separate = S2.read_hometax_purchase_sources(tmp_path, (START, END))
+    assert found[INSIDE] == (1000, 100, 1100)
+    assert separate == []
+    generic = "BuyHomeTax_20260901_20261020.CSV"
+    assert S2.period_from_export_name(generic) is None

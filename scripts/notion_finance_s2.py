@@ -36,7 +36,8 @@ _KRW_EXACT = re.compile(r"^[+-]?(?:0|[1-9]\d{0,2}(?:,\d{3})+|[1-9]\d*)$")
 _EXPORT_PERIOD = re.compile(r"_(\d{8})_(\d{8})(?:\.[^.]+)?$")
 _ISSUE_DATE = re.compile(r"(20\d{2}-\d{2}-\d{2})")
 _PERIOD_NAME = re.compile(
-    r"^(?:hometax_purchase_etax|hometax_purchase)_(\d{8})_(\d{8})\.csv$"
+    r"^(?:hometax_purchase_etax|hometax_purchase)_(\d{8})_(\d{8})\.csv$",
+    re.IGNORECASE,
 )
 
 
@@ -119,13 +120,17 @@ def _separate_non_digit_approval(
     tax: int,
     gross: int,
     separate: list[dict[str, str]],
+    found_held: dict[str, tuple[int, int, int]],
 ) -> None:
+    identity = _approval_identity(approval)
+    amounts = (net, tax, gross)
+    _store_held_approval(found_held, identity, amounts)
     _append_separate(
         separate,
         {
             "file": path.name,
             "row": row,
-            "approval_id": _approval_identity(approval),
+            "approval_id": identity,
             "approval_tail": approval[-4:],
             "net": str(net),
             "tax": str(tax),
@@ -139,6 +144,7 @@ def _read_hometax_xlsx(
     path: Path,
     found: dict[str, tuple[int, int, int]],
     separate: list[dict[str, str]],
+    found_held: dict[str, tuple[int, int, int]],
 ) -> None:
     with zipfile.ZipFile(path) as book:
         shared: list[str] = []
@@ -181,7 +187,7 @@ def _read_hometax_xlsx(
             assert net is not None and tax is not None and gross is not None
             if net + tax != gross:
                 raise SystemExit(f"hometax xlsx row {row_no} supply+tax!=gross")
-            _separate_non_digit_approval(path, str(row_no), approval, net, tax, gross, separate)
+            _separate_non_digit_approval(path, str(row_no), approval, net, tax, gross, separate, found_held)
             continue
         assert net is not None and tax is not None and gross is not None
         if net + tax != gross:
@@ -210,8 +216,24 @@ def _append_separate(separate: list[dict[str, str]], item: dict[str, str]) -> No
         return
     separate.append(item)
 
+def _store_held_approval(
+    found_held: dict[str, tuple[int, int, int]],
+    approval: str,
+    amounts: tuple[int, int, int],
+) -> None:
+    """Same non-digit approval, same amounts: once. Different amounts: reject."""
+    if approval in found_held and found_held[approval] != amounts:
+        raise SystemExit("duplicate hometax approval with different amounts")
+    found_held[approval] = amounts
 
-def _read_hometax_csv(path: Path, found: dict[str, tuple[int, int, int]], separate: list[dict[str, str]]) -> None:
+
+
+def _read_hometax_csv(
+    path: Path,
+    found: dict[str, tuple[int, int, int]],
+    separate: list[dict[str, str]],
+    found_held: dict[str, tuple[int, int, int]],
+) -> None:
     raw = path.read_bytes()
     text = _decode_hometax_text(raw)
     reader = csv.DictReader(io.StringIO(text))
@@ -241,7 +263,7 @@ def _read_hometax_csv(path: Path, found: dict[str, tuple[int, int, int]], separa
             raise SystemExit(f"hometax csv row {index} has amounts but a blank approval")
         compact = approval_raw.replace("-", "").replace(" ", "")
         if not _APPROVAL_COMPACT.fullmatch(compact):
-            _separate_non_digit_approval(path, str(index), approval_raw, net, tax, gross, separate)
+            _separate_non_digit_approval(path, str(index), approval_raw, net, tax, gross, separate, found_held)
             continue
         _store_approval(found, compact, (net, tax, gross))
 
@@ -268,7 +290,8 @@ def read_hometax_purchase_sources(
     and a blank CSV approval with nonzero amounts fails closed.
     A 24-digit approval with a blank or non-integer amount fails closed.
     Every parsed amount tuple must satisfy 공급가액+세액=합계금액.
-    The same held approval+amounts from overlapping files is listed once.
+    The same held approval and amounts from overlapping files is listed once.
+    The same held approval with different amounts is rejected, not summed.
     Negatives stay.
     Amounts are (net, tax, gross) = CSV 공급가액/세액/합계금액.
     UTF-8/CP949 decoding reuses price.ingest_safety.text_decode for the whole file.
@@ -280,18 +303,19 @@ def read_hometax_purchase_sources(
         _reject_unverified_period_sources(directory, period)
     found: dict[str, tuple[int, int, int]] = {}
     separate: list[dict[str, str]] = []
+    found_held: dict[str, tuple[int, int, int]] = {}
     for path in sorted(directory.glob("TAX_*BuyHomeTax.xlsx")):
         if not path.is_file():
             continue
         if period is not None and _source_issue_period(path) != period:
             raise SystemExit("unverified purchase file outside the resolved export period: " + path.name)
-        _read_hometax_xlsx(path, found, separate)
+        _read_hometax_xlsx(path, found, separate, found_held)
     for path in sorted(directory.rglob("*")):
         if path.suffix.casefold() != ".csv" or not _csv_is_hometax_purchase(path) or not path.is_file():
             continue
         if period is not None and _source_issue_period(path) != period:
             raise SystemExit("unverified purchase file outside the resolved export period: " + path.name)
-        _read_hometax_csv(path, found, separate)
+        _read_hometax_csv(path, found, separate, found_held)
     return found, separate
 
 
