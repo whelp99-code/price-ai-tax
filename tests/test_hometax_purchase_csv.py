@@ -932,16 +932,53 @@ def test_reconciliation_empty_purchase_intersection_reports_zero():
     assert "| hometax matched approvals | 0 | purchase intersection only |" in text
     assert "| hometax matched gross | 0 | purchase intersection only |" in text
 
+
+@pytest.mark.parametrize("purchase_match", [False, True])
+def test_dry_run_and_reconciliation_share_purchase_intersection(purchase_match):
+    from types import SimpleNamespace
+
+    from price.notion_finance_map import Hold
+
+    purchase = "202601010000000000000001"
+    negative = "202601010000000000000002"
+    sale = "202601010000000000000003"
+    unmatched = "202601010000000000000004"
+    hometax = {
+        purchase: (100, 10, 110),
+        negative: (-20, -2, -22),
+        sale: (200, 20, 220),
+        unmatched: (300, 30, 330),
+    }
+    report = S2.MapReport()
+    report.loaded.append(SimpleNamespace(
+        classification="매출", direction="sale", approval=sale, gross=220,
+    ))
+    if purchase_match:
+        report.loaded.append(SimpleNamespace(
+            classification="매입", direction="purchase", approval=purchase, gross=110,
+        ))
+        report.holds.extend([
+            Hold("duplicate", "매입", "held", gross=110, approval=purchase),
+            Hold("negative", "매입", "held", gross=-22, approval=negative),
+            Hold("absent", "매입", "held", gross=99, approval="9" * 24),
+        ])
+    expected = 88 if purchase_match else 0
+    dry_run = S2.dry_run_text(report, hometax)
+    reconciliation = S2.reconciliation(report, hometax, None)
+    assert f"hometax_matched_gross {expected}" in dry_run.splitlines()
+    assert f"| hometax matched gross | {expected} | purchase intersection only |" in reconciliation
+    assert "hometax_purchase_gross 638" in dry_run.splitlines()
+    assert hometax[negative] == (-20, -2, -22)
+
+
 def test_header_xlsx_keeps_csv_and_skips_or_holds_by_approval(tmp_path: Path):
     exact = "202601010000000000000024"
     negative = "202601010000000000000025"
-    short_bad = "12345678"
     short_hold = "87654321"
     _xlsx_with_header(
         tmp_path / "TAX_header_BuyHomeTax.xlsx",
         [
             (exact, "1000", "100", "1100"),
-            (short_bad, "10.5", "1", "11"),
             (short_hold, "20", "2", "22"),
             (negative, "-1,000", "-100", "-1,100"),
         ],
@@ -960,7 +997,6 @@ def test_header_xlsx_keeps_csv_and_skips_or_holds_by_approval(tmp_path: Path):
     assert found[exact] == (1000, 100, 1100)
     assert found[negative] == (-1000, -100, -1100)
     assert found[csv_exact] == (3000, 300, 3300)
-    assert short_bad not in found
     assert short_hold not in found
     assert [item["approval_tail"] for item in separate] == ["4321"]
     assert separate[0]["gross"] == "22"
@@ -971,3 +1007,67 @@ def test_short_xlsx_approval_with_inconsistent_integer_amounts_fails(tmp_path: P
     _xlsx_with_header(tmp_path / "TAX_bad_BuyHomeTax.xlsx", [("12345678", "100", "10", "999")])
     with pytest.raises(SystemExit, match="supply\\+tax!=gross"):
         S2.read_hometax_purchase_sources(tmp_path)
+
+
+@pytest.mark.parametrize("approval", ["12345678", "ABCD1234", "승인번호"])
+@pytest.mark.parametrize("amounts", [("", "10", "110"), ("100", "broken", "110"), ("", "", "")])
+def test_malformed_non24_xlsx_data_is_not_silently_dropped(tmp_path: Path, approval, amounts):
+    _xlsx_with_header(tmp_path / "TAX_bad_BuyHomeTax.xlsx", [(approval, *amounts)])
+    with pytest.raises(SystemExit, match="exact integer"):
+        S2.read_hometax_purchase_sources(tmp_path)
+
+
+def test_xlsx_explicit_titles_and_empty_rows_are_not_data(tmp_path: Path):
+    approval = "202601010000000000000001"
+    _xlsx_with_header(tmp_path / "TAX_titles_BuyHomeTax.xlsx", [
+        ("매입 전자세금계산서", "", "", ""),
+        ("전자세금계산서 매입내역", "", "", ""),
+        ("", "", "", ""),
+        (approval, "100", "10", "110"),
+    ])
+    assert S2.read_hometax_purchase_sources(tmp_path) == ({approval: (100, 10, 110)}, [])
+
+
+@pytest.mark.parametrize("partial_match", [False, True])
+def test_unmatched_notion_approval_blocks_equal_total_pass(partial_match):
+    from types import SimpleNamespace
+
+    report = S2.MapReport()
+    wrong = "202601010000000000000001"
+    correct = "202601010000000000000002"
+    shared = "202601010000000000000003"
+    hometax = {correct: (100, 10, 110)}
+    report.loaded.append(SimpleNamespace(
+        classification="매입", direction="purchase", approval=wrong, gross=110,
+    ))
+    if partial_match:
+        hometax[shared] = (200, 20, 220)
+        report.loaded.append(SimpleNamespace(
+            classification="매입", direction="purchase", approval=shared, gross=220,
+        ))
+    text = S2.reconciliation(report, hometax, None)
+    total = 330 if partial_match else 110
+    assert f"| hometax target vs loaded | {total} vs {total} | FAIL gap=0 |" in text
+    assert "| unmatched notion purchase approvals | 1 |" in text
+    assert "PASS" not in text.split("hold_explains")[0]
+
+
+def test_csv_names_are_filtered_before_reading_and_suffix_is_case_insensitive(tmp_path: Path, monkeypatch):
+    approval = "202601010000000000000001"
+    nested = tmp_path / "nested"
+    nested.mkdir()
+    selected = nested / "hometax_purchase.CsV"
+    selected.write_text(HEADER + _csv_row(approval, "110", "100", "10"), encoding="utf-8")
+    unrelated = nested / "unrelated.CSV"
+    unrelated.write_bytes(b"unrelated")
+    read_bytes = Path.read_bytes
+    reads = []
+
+    def guarded_read(path):
+        assert path != unrelated, "unrelated CSV must not be read"
+        reads.append(path)
+        return read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", guarded_read)
+    assert S2.read_hometax_purchase_sources(tmp_path) == ({approval: (100, 10, 110)}, [])
+    assert reads == [selected]
