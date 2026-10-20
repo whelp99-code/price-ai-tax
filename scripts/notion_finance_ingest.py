@@ -18,7 +18,17 @@ from price.db import Database
 import importlib.util
 
 from price.notion_finance_ingest import apply_drafts, edited_index
-from price.notion_finance_map import map_snapshot
+from price.notion_finance_map import Hold, Mapped, map_snapshot
+
+
+def _purchase_approval(item: Mapped | Hold) -> str | None:
+    if getattr(item, "classification", "") != "매입":
+        return None
+    approval = getattr(item, "approval", None)
+    if approval:
+        return approval
+    stored = getattr(item, "keys", {}).get("hometax-approval") if hasattr(item, "keys") else None
+    return stored or None
 
 _s2 = Path(__file__).with_name("notion_finance_s2.py")
 _spec = importlib.util.spec_from_file_location("notion_finance_s2", _s2)
@@ -100,9 +110,9 @@ def main() -> None:
     result["hometax_numeric"] = len(hometax)
     result["hometax_separate_non_digit"] = len(separate)
     notion_approvals = {
-        item.approval
+        approval
         for item in (*mapped.loaded, *mapped.holds)
-        if getattr(item, "approval", None)
+        if (approval := _purchase_approval(item))
     }
     matched_approvals = set(hometax) & notion_approvals
     result["hometax_matched"] = len(matched_approvals)

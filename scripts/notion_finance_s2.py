@@ -19,6 +19,7 @@ from price.auth import Actor
 from price.db import Database, digest
 from price.models import CompanyInput
 from price.notion_finance_map import MapReport, Mapped, map_snapshot, purchase_match_verdict
+from price.ingest_safety import text_decode
 from price.service import Service
 
 FORBIDDEN = {
@@ -74,12 +75,19 @@ def _exact_krw(raw: str, label: str) -> int:
     return -value if negative else value
 
 
-def _csv_header_fields(sample: bytes) -> list[str] | None:
-    if sample.startswith(b"\xef\xbb\xbf"):
-        sample = sample[3:]
+def _decode_hometax_text(raw: bytes) -> str:
+    """Reuse the shared decoder so sniff and body use one encoding."""
     try:
-        header = sample.decode("utf-8-sig").splitlines()[0]
-    except (UnicodeDecodeError, IndexError):
+        text, _encoding = text_decode(raw)
+    except ValueError as exc:
+        raise SystemExit(f"hometax csv encoding rejected: {exc}") from exc
+    return text
+
+
+def _csv_header_fields(sample: bytes) -> list[str] | None:
+    try:
+        header = _decode_hometax_text(sample).splitlines()[0]
+    except (SystemExit, IndexError):
         return None
     return next(csv.reader(io.StringIO(header)), [])
 
@@ -99,7 +107,35 @@ def _csv_is_hometax_purchase(path: Path, sample: bytes) -> bool:
     return True
 
 
-def _read_hometax_xlsx(path: Path, found: dict[str, tuple[int, int, int]]) -> None:
+def _separate_non_digit_approval(
+    path: Path,
+    row: str,
+    approval: str,
+    net: int,
+    tax: int,
+    gross: int,
+    separate: list[dict[str, str]],
+) -> None:
+    _append_separate(
+        separate,
+        {
+            "file": path.name,
+            "row": row,
+            "approval_id": _approval_identity(approval),
+            "approval_tail": approval[-4:],
+            "net": str(net),
+            "tax": str(tax),
+            "gross": str(gross),
+            "reason": "approval is not exactly 24 digits after hyphen removal; not coerced",
+        },
+    )
+
+
+def _read_hometax_xlsx(
+    path: Path,
+    found: dict[str, tuple[int, int, int]],
+    separate: list[dict[str, str]],
+) -> None:
     with zipfile.ZipFile(path) as book:
         shared: list[str] = []
         if "xl/sharedStrings.xml" in book.namelist():
@@ -115,12 +151,20 @@ def _read_hometax_xlsx(path: Path, found: dict[str, tuple[int, int, int]]) -> No
             if cell.get("t") == "s" and value != "":
                 value = shared[int(value)]
             rows.setdefault(row, {})[col] = value
-    for cols in rows.values():
-        approval = cols.get(2, "")
-        if not approval.isdigit():
+    for row_no, cols in rows.items():
+        approval = cols.get(2, "").strip()
+        if not approval:
             continue
-        amounts = (int(cols[9]), int(cols[10]), int(cols[11]))
-        _store_approval(found, approval, amounts)
+        net = int(cols[9])
+        tax = int(cols[10])
+        gross = int(cols[11])
+        if net + tax != gross:
+            raise SystemExit(f"hometax xlsx row {row_no} supply+tax!=gross")
+        compact = approval.replace("-", "").replace(" ", "")
+        if not _APPROVAL_COMPACT.fullmatch(compact):
+            _separate_non_digit_approval(path, str(row_no), approval, net, tax, gross, separate)
+            continue
+        _store_approval(found, compact, (net, tax, gross))
 
 
 def _approval_identity(raw: str) -> str:
@@ -147,9 +191,7 @@ def _append_separate(separate: list[dict[str, str]], item: dict[str, str]) -> No
 
 def _read_hometax_csv(path: Path, found: dict[str, tuple[int, int, int]], separate: list[dict[str, str]]) -> None:
     raw = path.read_bytes()
-    if raw.startswith(b"\xef\xbb\xbf"):
-        raw = raw[3:]
-    text = raw.decode("utf-8-sig")
+    text = _decode_hometax_text(raw)
     reader = csv.DictReader(io.StringIO(text))
     fields = reader.fieldnames or []
     required = ("승인번호", "합계금액", "공급가액", "세액")
@@ -171,23 +213,13 @@ def _read_hometax_csv(path: Path, found: dict[str, tuple[int, int, int]], separa
         gross = _exact_krw(gross_raw, "합계금액")
         net = _exact_krw(net_raw, "공급가액")
         tax = _exact_krw(tax_raw, "세액")
+        if net + tax != gross:
+            raise SystemExit(f"hometax csv row {index} supply+tax!=gross")
         if not approval_raw:
             raise SystemExit(f"hometax csv row {index} has amounts but a blank approval")
         compact = approval_raw.replace("-", "").replace(" ", "")
         if not _APPROVAL_COMPACT.fullmatch(compact):
-            _append_separate(
-                separate,
-                {
-                    "file": path.name,
-                    "row": str(index),
-                    "approval_id": _approval_identity(approval_raw),
-                    "approval_tail": approval_raw[-4:],
-                    "net": str(net),
-                    "tax": str(tax),
-                    "gross": str(gross),
-                    "reason": "approval is not exactly 24 digits after hyphen removal; not coerced",
-                },
-            )
+            _separate_non_digit_approval(path, str(index), approval_raw, net, tax, gross, separate)
             continue
         _store_approval(found, compact, (net, tax, gross))
 
@@ -207,18 +239,21 @@ def read_hometax_purchase_sources(
     amount columns are not enough. SellHomeTax/매출 is excluded.
     A selected file missing one of 승인번호/합계금액/공급가액/세액 fails closed.
     Only approvals that are exactly 24 digits after hyphen removal are matched.
-    Other approval values are returned individually and are not digit-coerced.
-    The same held approval+amounts from overlapping files is listed once.
+    8-23 digit and other non-24 values are returned individually and are not
+    digit-coerced, for both CSV and XLSX. The same held approval+amounts
+    from overlapping files is listed once.
     A blank approval on a row that still has amounts fails closed. A fully
     blank approval-and-amount row is skipped.
     Amounts must be exact integer won, optional sign, optional thousands commas.
-    Amounts are (net, tax, gross) = CSV 공급가액/세액/합계금액, including negatives.
+    A row whose 공급가액+세액 does not equal 합계금액 fails closed. Negatives stay.
+    Amounts are (net, tax, gross) = CSV 공급가액/세액/합계금액.
+    UTF-8/CP949 decoding reuses price.ingest_safety.text_decode for the whole file.
     Identical approval+amounts across xlsx and CSV are stored once.
     """
     found: dict[str, tuple[int, int, int]] = {}
     separate: list[dict[str, str]] = []
     for path in sorted(directory.glob("TAX_*BuyHomeTax.xlsx")):
-        _read_hometax_xlsx(path, found)
+        _read_hometax_xlsx(path, found, separate)
     for path in sorted(directory.rglob("*.csv")):
         sample = path.read_bytes()[:4096]
         if not _csv_is_hometax_purchase(path, sample):
@@ -332,13 +367,18 @@ def _link_approval(db: Database, company: str, item: Mapped, object_id: str) -> 
         )
 
 
+def _purchase_hold(item) -> bool:
+    return getattr(item, "classification", "") == "매입"
+
+
 def reconciliation(report: MapReport, hometax: dict[str, tuple[int, int, int]], load: dict | None) -> str:
     hometax_gross = sum(item[2] for item in hometax.values())
-    held_gross = sum(item.gross or 0 for item in report.holds if item.classification == "매입")
+    held_gross = sum(item.gross or 0 for item in report.holds if _purchase_hold(item))
     loaded_gross = report.purchase_loaded_gross()
     verdict = purchase_match_verdict(loaded_gross, hometax_gross, report.holds)
     separate = report.hometax_separate
-    if report.holds or separate:
+    purchase_holds = [item for item in report.holds if _purchase_hold(item)]
+    if purchase_holds or separate:
         verdict = {
             "status": "FAIL",
             "gap": verdict["gap"],
@@ -373,8 +413,14 @@ def reconciliation(report: MapReport, hometax: dict[str, tuple[int, int, int]], 
     lines.append("Draft only. Not a filed return. Sales per-invoice files were not compared.")
     separate = getattr(report, "hometax_separate", [])
     separate_gross = sum(int(item.get("gross") or 0) for item in separate)
-    lines.append(f"| hometax matched approvals | {len(hometax)} | 24-digit only |")
-    lines.append(f"| hometax matched gross | {hometax_gross} | match target |")
+    matched = {
+        item.approval
+        for item in (*report.loaded, *report.holds)
+        if getattr(item, "classification", "") == "매입" and getattr(item, "approval", None)
+    } & set(hometax)
+    matched_gross = sum(hometax[key][2] for key in matched)
+    lines.append(f"| hometax matched approvals | {len(matched)} | purchase intersection only |")
+    lines.append(f"| hometax matched gross | {matched_gross} | purchase intersection only |")
     lines.append(f"| hometax separate approvals | {len(separate)} | not coerced |")
     lines.append(f"| hometax separate gross | {separate_gross} | excluded from match target |")
     lines.append(f"| hometax all-row gross | {hometax_gross + separate_gross} | matched plus separate |")

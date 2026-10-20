@@ -281,7 +281,7 @@ def test_reconciliation_lists_each_hold_and_splits_totals():
     assert "file=purchases.csv" in text
     assert "gross=11" in text
     assert "net=10" in text
-    assert "| hometax matched gross | 110 |" in text
+    assert "| hometax matched gross | 0 |" in text
     assert "| hometax separate gross | 11 |" in text
     assert "| hometax all-row gross | 121 |" in text
 
@@ -746,3 +746,154 @@ def test_operational_reconciliation_receives_separate_and_blocks_pass(tmp_path: 
     assert separate
     assert "| hometax target vs loaded | 1100 vs 1100 | FAIL gap=0 |" in text
     assert "PASS" not in text.split("hold_explains")[0]
+    assert "| hometax matched approvals | 1 | purchase intersection only |" in text
+    assert "| hometax matched gross | 1100 | purchase intersection only |" in text
+
+
+def test_xlsx_short_digit_approval_is_separate_not_found(tmp_path: Path):
+    short = "12345678"
+    medium = "12345678901234567890123"
+    exact = "123456789012345678901234"
+    _xlsx(
+        tmp_path / "TAX_demo_BuyHomeTax.xlsx",
+        [
+            (short, "10", "1", "11"),
+            (medium, "20", "2", "22"),
+            (exact, "100", "10", "110"),
+        ],
+    )
+    found, separate = S2.read_hometax_purchase_sources(tmp_path)
+    assert list(found) == [exact]
+    assert found[exact] == (100, 10, 110)
+    assert short not in found
+    assert medium not in found
+    assert [item["approval_tail"] for item in separate] == ["5678", "0123"]
+    assert [item["gross"] for item in separate] == ["11", "22"]
+    purchases = S2.read_hometax_purchases(tmp_path)
+    assert list(purchases) == [exact]
+
+
+def test_supply_plus_tax_must_equal_gross_csv_and_xlsx(tmp_path: Path):
+    approval = "202601010000000000000909"
+    (tmp_path / "hometax_purchase.csv").write_text(
+        HEADER + _csv_row(approval, "1100", "1000", "200"),
+        encoding="utf-8",
+    )
+    with pytest.raises(SystemExit, match="supply\\+tax!=gross"):
+        S2.read_hometax_purchase_sources(tmp_path)
+    (tmp_path / "hometax_purchase.csv").unlink()
+    (tmp_path / "hometax_purchase_neg.csv").write_text(
+        HEADER + _csv_row(approval, "-1,100", "-1,000", "-100"),
+        encoding="utf-8",
+    )
+    found, separate = S2.read_hometax_purchase_sources(tmp_path)
+    assert separate == []
+    assert found[approval] == (-1000, -100, -1100)
+    (tmp_path / "hometax_purchase_neg.csv").unlink()
+    _xlsx(tmp_path / "TAX_bad_BuyHomeTax.xlsx", [(approval, "1000", "200", "1100")])
+    with pytest.raises(SystemExit, match="supply\\+tax!=gross"):
+        S2.read_hometax_purchase_sources(tmp_path)
+
+
+def test_cp949_purchase_csv_uses_shared_decoder(tmp_path: Path):
+    approval = "202601010000000000000808"
+    text = HEADER + _csv_row(approval, "1100", "1000", "100")
+    (tmp_path / "매입-cp949.csv").write_bytes(text.encode("cp949"))
+    found, separate = S2.read_hometax_purchase_sources(tmp_path)
+    assert separate == []
+    assert found[approval] == (1000, 100, 1100)
+    mixed = text.encode("utf-8") + "깨진".encode("cp949")
+    (tmp_path / "매입-mixed.csv").write_bytes(mixed)
+    with pytest.raises(SystemExit, match="encoding rejected"):
+        S2.read_hometax_purchase_sources(tmp_path)
+
+
+def test_sales_and_bank_holds_do_not_fail_purchase_match():
+    from price.notion_finance_map import Hold
+
+    approval = "202601010000000000000099"
+    report = S2.MapReport()
+    report.loaded.append(
+        type("Row", (), {"classification": "매입", "approval": approval, "direction": "purchase", "gross": 110})()
+    )
+    report.holds.extend(
+        [
+            Hold("page-sale", "매출", "sale date missing", gross=99000),
+            Hold("page-bank", "기타출금", "bank fact missing", gross=5000),
+        ]
+    )
+    text = S2.reconciliation(report, {approval: (100, 10, 110)}, None)
+    assert "| hometax target vs loaded | 110 vs 0 | PASS gap=110 |" not in text
+    assert "| hometax target vs loaded | 110 vs 0 | FAIL" not in text
+    assert "PASS" in text.split("hold_explains")[0]
+    report.holds.append(Hold("page-buy", "매입", "purchase held", gross=11, approval=approval))
+    blocked = S2.reconciliation(report, {approval: (100, 10, 110)}, None)
+    assert "FAIL" in blocked.split("hold_explains")[0]
+    assert "PASS" not in blocked.split("hold_explains")[0]
+
+
+def test_ingest_matched_ignores_non_purchase_approvals(tmp_path: Path):
+    sale = "202601010000000000000202"
+    purchase = "202601151234567890123456"
+    snapshot = {
+        "finance": [
+            {
+                "sourceId": "page-sale",
+                "lastEditedTime": "2026-09-30T00:00:00.000Z",
+                "properties": {
+                    "구분": "매출",
+                    "금액": 90000,
+                    "부가세": 9000,
+                    "합계": 99000,
+                    "거래명": "synthetic sale | 2026-01-15",
+                    "자연키": f"invoice|{sale}",
+                    "메모": f"홈택스 승인번호: {sale}",
+                    "실제 처리일": "2026-01-15",
+                },
+            }
+        ]
+    }
+    (tmp_path / "snap.json").write_text(json.dumps(snapshot), encoding="utf-8")
+    (tmp_path / "BuyHomeTax.csv").write_text(
+        HEADER + _csv_row(sale, "99000", "90000", "9000") + _csv_row(purchase, "1100", "1000", "100"),
+        encoding="utf-8",
+    )
+    db = tmp_path / "scratch-sale.sqlite3"
+    spec = importlib.util.spec_from_file_location(
+        "notion_finance_ingest_purchase_only",
+        Path(__file__).resolve().parents[1] / "scripts" / "notion_finance_ingest.py",
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    from price.db import Database
+    from price.models import CompanyInput
+    from price.service import Service
+
+    opened = Database(db)
+    Service(opened).auth.bootstrap(CompanyInput(name="scratch-sale"), "scratch-sale", "scratch-secret-sale")
+    buf = io.StringIO()
+    argv = sys.argv
+    sys.argv = [
+        "notion_finance_ingest",
+        "--snapshot",
+        str(tmp_path / "snap.json"),
+        "--db",
+        str(db),
+        "--hometax-dir",
+        str(tmp_path),
+    ]
+    try:
+        with contextlib.redirect_stdout(buf):
+            module.main()
+    finally:
+        sys.argv = argv
+    result = json.loads(buf.getvalue())
+    assert result["hometax_numeric"] == 2
+    assert result["hometax_matched"] == 0
+
+
+def test_reconciliation_empty_purchase_intersection_reports_zero():
+    report = S2.MapReport()
+    text = S2.reconciliation(report, {"123456789012345678901234": (100, 10, 110)}, None)
+    assert "| hometax matched approvals | 0 | purchase intersection only |" in text
+    assert "| hometax matched gross | 0 | purchase intersection only |" in text

@@ -127,6 +127,13 @@ def test_verdict_fails_on_hardcoded_pass_string():
     assert purchase_match_verdict(194_911_200, 194_911_200, [])["status"] == "PASS"
     script = Path(__file__).resolve().parents[1].joinpath("scripts/notion_finance_s2.py").read_text()
     assert "PASS after hold resolved" not in script
+def test_labeled_approval_keeps_label_and_tail_is_not_merged():
+    memo = "홈택스 승인번호: 20261015-41000021-b0009795"
+    held = map_row(_row(자연키="bank|page-label", 메모=memo, page="page-label-tail"))
+    assert held.held
+    assert "not a complete 24-digit number" in held.reason
+    assert held.approval_tail == "9795"
+    assert "20261015-41000021-b0009795" not in held.reason
 
 
 def test_missing_bank_tax_is_zero_not_invented_invoice_tax():
