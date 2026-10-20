@@ -247,3 +247,87 @@ def test_disappeared_page_is_reported_not_deleted(scratch):
     with db.connect() as c:
         n = c.execute("SELECT count(*) FROM objects WHERE kind='transaction'").fetchone()[0]
     assert n == 1
+
+
+@pytest.mark.parametrize("explicit", [False, True])
+@pytest.mark.parametrize("existing_db", [False, True])
+@pytest.mark.parametrize("bad_title", ["작성일 없음", "거래 | 2026-02-31"])
+def test_missing_later_issue_date_rejects_before_any_write(tmp_path: Path, explicit, existing_db, bad_title):
+    import contextlib
+    import importlib.util
+    import io
+    import sys
+
+    spec = importlib.util.spec_from_file_location(
+        "notion_finance_ingest_date_gate",
+        Path(__file__).resolve().parents[1] / "scripts" / "notion_finance_ingest.py",
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    db_path = tmp_path / "scratch.sqlite3"
+    if existing_db:
+        opened = Database(db_path)
+        Service(opened).auth.bootstrap(CompanyInput(name="scratch-date"), "scratch-date", "scratch-secret-date")
+    before = db_path.read_bytes() if existing_db else None
+    dated = _row("page-dated", approval="202609011234567890123456")
+    missing = _row("page-missing", approval="202609021234567890123457")
+    missing["properties"]["거래명"] = bad_title
+    snapshot = tmp_path / "snap.json"
+    snapshot.write_text(json.dumps({"finance": [dated, missing]}), encoding="utf-8")
+    export = tmp_path / "exports"
+    export.mkdir()
+    (export / "hometax_purchase_etax_20260901_20261020.csv").write_text("승인번호,합계금액,공급가액,세액\n", encoding="utf-8")
+    argv = sys.argv
+    sys.argv = [
+        "notion_finance_ingest",
+        "--snapshot", str(snapshot),
+        "--db", str(db_path),
+        "--hometax-dir", str(export),
+        "--backup-dir", str(tmp_path / "backups"),
+        "--report", str(tmp_path / "report.json"),
+    ]
+    if explicit:
+        sys.argv += ["--period-start", "2026-09-01", "--period-end", "2026-10-20"]
+    try:
+        with pytest.raises(SystemExit, match="purchase issue date missing"):
+            with contextlib.redirect_stdout(io.StringIO()):
+                module.main()
+    finally:
+        sys.argv = argv
+    if existing_db:
+        assert db_path.read_bytes() == before
+    else:
+        assert not db_path.exists()
+    assert not (tmp_path / "backups").exists()
+    assert not (tmp_path / "report.json").exists()
+
+
+@pytest.mark.parametrize("source_period", ["missing", "conflicting"])
+def test_no_flag_ingest_rejects_unresolved_period_before_database(tmp_path, monkeypatch, source_period):
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "notion_ingest_unresolved_period",
+        Path(__file__).resolve().parents[1] / "scripts" / "notion_finance_ingest.py",
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    snapshot = tmp_path / "snap.json"
+    snapshot.write_text(json.dumps({"finance": [_row("valid")]}), encoding="utf-8")
+    exports = tmp_path / "exports"
+    exports.mkdir()
+    names = ["BuyHomeTax.csv"] if source_period == "missing" else [
+        "hometax_purchase_etax_20260901_20261020.csv",
+        "hometax_purchase_etax_20260801_20260831.csv",
+    ]
+    for name in names:
+        (exports / name).write_text("승인번호,합계금액,공급가액,세액\n", encoding="utf-8")
+    db_path = tmp_path / "absent.sqlite3"
+    monkeypatch.setattr("sys.argv", [
+        "ingest", "--snapshot", str(snapshot), "--db", str(db_path),
+        "--hometax-dir", str(exports), "--backup-dir", str(tmp_path / "backups"),
+    ])
+    with pytest.raises(SystemExit, match="purchase period missing"):
+        module.main()
+    assert not db_path.exists()
+    assert not (tmp_path / "backups").exists()

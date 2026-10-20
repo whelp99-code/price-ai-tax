@@ -26,6 +26,7 @@ CLASSIFICATION: dict[
 }
 
 _DATE = re.compile(r"(20\d{2}-\d{2}-\d{2})")
+_TITLE_ISSUE_DATE = re.compile(r"\|\s*(20\d{2}-\d{2}-\d{2})\s*$")
 _APPROVAL_EXACT = re.compile(r"^[0-9]{24}$")
 _INVOICE_KEY = re.compile(r"^invoice\|([0-9]{24})$")
 
@@ -41,6 +42,7 @@ class Hold:
     tax: int | None = None
     gross: int | None = None
     approval_tail: str = ""
+    issue_date: date | None = None
     approval: str | None = None
     counterparty: str = ""
     external_gross: int | None = None
@@ -62,6 +64,7 @@ class Mapped:
     approval: str | None
     keys: dict[str, str]
     draft: TransactionInput
+    issue_date: date | None = None
 
     @property
     def held(self) -> bool:
@@ -103,6 +106,15 @@ def _date_from(*texts: str | None) -> date | None:
         if match:
             return date.fromisoformat(match.group(1))
     return None
+def purchase_issue_date(title: str) -> date | None:
+    """Original issue date at the end of 거래명. Not 실제 처리일 or createdAt."""
+    match = _TITLE_ISSUE_DATE.search(title or "")
+    if not match:
+        return None
+    try:
+        return date.fromisoformat(match.group(1))
+    except ValueError:
+        return None
 
 
 def _labeled_approval_token(memo: str) -> tuple[str | None, bool, str]:
@@ -155,6 +167,8 @@ def map_row(row: Mapping[str, JsonValue]) -> Mapped | Hold:
     properties = row.get("properties")
     props = properties if isinstance(properties, Mapping) else row
     classification = str(props.get("구분") or "").strip()
+    approval, approval_conflict, approval_tail = _approval(str(props.get("자연키") or ""), str(props.get("메모") or ""))
+    issue_date = purchase_issue_date(str(props.get("거래명") or "")) if classification == "매입" else None
     if not page_id:
         return Hold("", classification, "missing notion page id; not fixed")
     pair = CLASSIFICATION.get(classification)
@@ -168,7 +182,7 @@ def map_row(row: Mapping[str, JsonValue]) -> Mapped | Hold:
     for label, value in (("net", props.get("금액")), ("tax", raw_tax), ("gross", props.get("합계"))):
         parsed = _money(value, label)
         if isinstance(parsed, Hold):
-            return Hold(page_id, classification, parsed.reason)
+            return Hold(page_id, classification, parsed.reason, issue_date=issue_date, approval_tail=approval_tail, approval=approval)
         amounts.append(parsed)
     net, tax, gross = amounts
     if net + tax != gross:
@@ -179,10 +193,12 @@ def map_row(row: Mapping[str, JsonValue]) -> Mapped | Hold:
             net,
             tax,
             gross,
+            issue_date=issue_date,
+            approval_tail=approval_tail,
+            approval=approval,
         )
     if kind == "bank" and tax:
-        return Hold(page_id, classification, "tax on bank-only row; not fixed", net, tax, gross)
-    approval, approval_conflict, approval_tail = _approval(str(props.get("자연키") or ""), str(props.get("메모") or ""))
+        return Hold(page_id, classification, "tax on bank-only row; not fixed", net, tax, gross, issue_date=issue_date, approval_tail=approval_tail, approval=approval)
     if approval_conflict:
         return Hold(
             page_id,
@@ -193,6 +209,7 @@ def map_row(row: Mapping[str, JsonValue]) -> Mapped | Hold:
             gross,
             approval_tail=approval_tail,
             approval=approval,
+            issue_date=issue_date,
         )
     if kind == "invoice" and tax == 0:
         return Hold(
@@ -202,6 +219,9 @@ def map_row(row: Mapping[str, JsonValue]) -> Mapped | Hold:
             net,
             tax,
             gross,
+            issue_date=issue_date,
+            approval_tail=approval_tail,
+            approval=approval,
         )
     if kind == "invoice" and tax * 10 != net:
         return Hold(
@@ -211,6 +231,9 @@ def map_row(row: Mapping[str, JsonValue]) -> Mapped | Hold:
             net,
             tax,
             gross,
+            issue_date=issue_date,
+            approval_tail=approval_tail,
+            approval=approval,
         )
     processed_date = props.get("실제 처리일")
     event_date = _date_from(
@@ -220,7 +243,7 @@ def map_row(row: Mapping[str, JsonValue]) -> Mapped | Hold:
         str(props.get("메모") or ""),
     )
     if event_date is None:
-        return Hold(page_id, classification, "no event date; not fixed", net, tax, gross)
+        return Hold(page_id, classification, "no event date; not fixed", net, tax, gross, issue_date=issue_date, approval_tail=approval_tail, approval=approval)
     tax_category = "standard" if kind == "invoice" else "unknown"
     keys = {"notion-page": page_id}
     if approval:
@@ -238,7 +261,9 @@ def map_row(row: Mapping[str, JsonValue]) -> Mapped | Hold:
         tax_category=tax_category,
         deductible=None,
     )
-    return Mapped(page_id, classification, kind, direction, net, tax, gross, approval, keys, draft)
+    return Mapped(
+        page_id, classification, kind, direction, net, tax, gross, approval, keys, draft, issue_date=issue_date,
+    )
 
 
 def apply_external_amount_conflict(
@@ -266,6 +291,7 @@ def apply_external_amount_conflict(
         approval_tail=item.approval[-4:],
         approval=item.approval,
         counterparty=item.draft.counterparty,
+        issue_date=item.issue_date,
         external_gross=observed[2],
     )
 
@@ -280,7 +306,7 @@ def purchase_match_verdict(loaded_gross: int, hometax_gross: int, holds: list[Ho
     parts: list[str] = []
     explained = 0
     for hold in holds:
-        if hold.classification != "매입" or hold.external_gross is None or hold.gross is None:
+        if getattr(hold, "classification", "") != "매입" or getattr(hold, "external_gross", None) is None or hold.gross is None:
             continue
         explained += hold.external_gross
         label = hold.counterparty or "held"
