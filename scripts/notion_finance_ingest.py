@@ -25,6 +25,7 @@ _spec = importlib.util.spec_from_file_location("notion_finance_s2", _s2)
 _mod = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_mod)
 read_hometax_purchases = _mod.read_hometax_purchases
+read_hometax_purchase_sources = _mod.read_hometax_purchase_sources
 
 DEMO = Path("/home/jm/orca/projects/price/.data/demo.sqlite3").resolve()
 
@@ -84,7 +85,10 @@ def main() -> None:
         backup_path = backup_sqlite(db_path, args.backup_dir)
     payload = json.loads(args.snapshot.read_text())
     finance = payload["finance"]
-    hometax = read_hometax_purchases(args.hometax_dir) if args.hometax_dir else {}
+    if args.hometax_dir:
+        hometax, separate = read_hometax_purchase_sources(args.hometax_dir)
+    else:
+        hometax, separate = {}, []
     mapped = map_snapshot(finance, hometax)
     db = Database(db_path)
     with db.connect() as c:
@@ -93,6 +97,16 @@ def main() -> None:
     result = apply_drafts(db, actor, company, mapped, edited_index(finance))
     result["backup"] = str(backup_path) if backup_path else None
     result["journals_before"] = int(journals_before)
+    result["hometax_numeric"] = len(hometax)
+    result["hometax_separate_non_digit"] = len(separate)
+    result["hometax_matched"] = len(hometax)
+    result["hometax_separate"] = [
+        {"approval_tail": item.get("approval_tail", ""), "gross": item.get("gross", ""), "reason": item.get("reason", "")}
+        for item in separate
+    ]
+    result["hometax_separate_gross"] = sum(int(item.get("gross") or 0) for item in separate)
+    result["hometax_all_row_gross"] = sum(item[2] for item in hometax.values()) + result["hometax_separate_gross"]
+    result["core_ingest_reads_hometax"] = False
     if result["journals"] != int(journals_before):
         raise SystemExit("draft ingest created a journal")
     text = json.dumps(result, ensure_ascii=False)
