@@ -13,3 +13,13 @@ jobs:
           python-version: "3.12"
       - run: pip install -e ".[test]"
       - run: pytest tests/test_notion_finance_ingest.py tests/test_notion_finance_map.py
+  vat-crosscheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[test,external-calc]"
+      - run: python -c "import importlib.metadata as m; assert m.version('korean-tax-calc-mcp')=='0.12.2'"
+      - run: pytest tests/test_external_vat_crosscheck.py
