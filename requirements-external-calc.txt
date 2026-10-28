@@ -1,0 +1,3 @@
+# Optional VAT cross-check only. Not part of the default install.
+# Runtime rejects every other installed version with BLOCKED_VERSION_MISMATCH.
+korean-tax-calc-mcp==0.12.2
