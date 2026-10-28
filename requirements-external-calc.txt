@@ -1,3 +1,6 @@
 # Optional VAT cross-check only. Not part of the default install.
 # Runtime rejects every other installed version with BLOCKED_VERSION_MISMATCH.
 korean-tax-calc-mcp==0.12.2
+# Keep TestClient on httpx.Client. Starlette 1.x prefers httpx2, which this
+# package's MCP dependency installs, and the app tests reject that client.
+starlette==0.52.1
