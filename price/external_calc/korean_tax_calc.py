@@ -203,7 +203,7 @@ def crosscheck_common_input(data: object) -> dict:
     integers are MATCH. Any other external outcome is REVIEW. requires_review
     stays True either way.
     """
-    from .vat_rules_kr import CommonInput, apportion_common_input
+    from ..vat_rules_kr import CommonInput, apportion_common_input
 
     parsed = CommonInput.model_validate(data)
     authoritative = apportion_common_input(parsed)
