@@ -184,7 +184,9 @@ async function uploadFiles(selected) {
       }
       batch=await post('/uploads/'+batch.id+'/complete',{expected_revision:batch.revision}); state.upload=batch;
     }
-    $('#transfer-progress').value=total; $('#transfer-label').textContent='자료 접수 완료'; $('#transfer-message').textContent='원본을 보관하고 읽기 작업을 등록했습니다. 장부·세금 처리가 완료됐다는 의미는 아닙니다.'; toast('원본 자료를 접수했습니다.');
+    const questions=(batch.owner_questions||[]).length;
+    const done=questions? '확인할 사실이 '+questions+'건 있습니다.':'읽기·연결 결과를 반영했습니다.';
+    $('#transfer-progress').value=total; $('#transfer-label').textContent='자료 접수 완료'; $('#transfer-message').textContent='원본을 보관하고 '+done+' 장부 확정·세금 신고가 완료됐다는 의미는 아닙니다.'; toast('원본 자료를 접수했습니다.');
   } catch(error) { $('#transfer-message').textContent=error.name==='AbortError'?'전송을 잠시 멈췄습니다. 같은 파일을 다시 선택하면 이어서 진행합니다.':error.message; if(error.name!=='AbortError') showError(error); }
   finally { setUploading(false); $('#owner-files').value=''; await refresh().catch(showError); }
 }

@@ -48,8 +48,12 @@ def test_binary_upload_to_source_case_without_manual_transaction(web, w):
     assert send(client, path, batch).status_code == 200
     r = client.post(path + '/uploads/' + batch['id'] + '/complete', json={'expected_revision':batch['revision']})
     assert r.status_code == 200, r.text
-    doc = r.json()['files'][0]['document']['id']
-    assert app.state.source_reader.run_once(w.company)['cases'] == 2
+    body = r.json()
+    doc = body['files'][0]['document']['id']
+    assert body['accounting_complete'] is False and body['manual_transaction_required'] is False
+    assert body['source_reading'] and body['source_reading'][0]['cases'] == 2
+    assert body['casework']['events'] >= 1
+    assert app.state.source_reader.run_once(w.company)['processed'] is False
     result = client.get(path + '/documents/' + doc + '/extraction').json()
     assert result['total'] == 2
     home = client.get(path + '/owner/home').json()

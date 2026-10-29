@@ -49,7 +49,30 @@ def register_upload_routes(app, service, actor_dependency):
 
     @app.post(prefix + '/uploads/{batch}/complete')
     def complete_upload(company: str, batch: str, data: CompleteUploadInput, a: Actor = Depends(actor_dependency)):
-        return uploads.complete(a, company, batch, data.expected_revision)
+        uploads.complete(a, company, batch, data.expected_revision)
+        reading = []
+        for _ in range(100):
+            step = reader.run_once(company)
+            if not step.get('processed'):
+                break
+            reading.append({key: step.get(key) for key in ('id', 'state', 'error', 'records', 'cases', 'committed')})
+        from .casework import Casework
+        linked = Casework(service).refresh(a, company)
+        view = uploads.get(a, company, batch)
+        questions = []
+        with service.db.connect() as c:
+            service.auth.guard(c, a, company)
+            for event in service.db.list(c, company, 'economic_event'):
+                if event.get('lifecycle') == 'SUPERSEDED':
+                    continue
+                for question in event.get('questions') or []:
+                    questions.append({'event_id': event['id'], 'question': question})
+        view['source_reading'] = reading
+        view['casework'] = linked
+        view['owner_questions'] = questions
+        view['accounting_complete'] = False
+        view['manual_transaction_required'] = False
+        return view
 
     @app.post(prefix + '/uploads/{batch}/cancel')
     def cancel_upload(company: str, batch: str, data: CancelUploadInput, a: Actor = Depends(actor_dependency)):
