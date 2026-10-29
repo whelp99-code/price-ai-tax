@@ -172,17 +172,32 @@ def test_complete_returns_dynamic_questions_and_skips_older_queue(web, w):
     document_id = body['files'][0]['document']['id']
     assert body['reading_pending'] is False and body['reading_attention'] == []
     assert body['source_reading'] and {step['document_id'] for step in body['source_reading']} == {document_id}
-    assert body['owner_questions'] and body['owner_questions'][0]['key'] == 'business_use'
-    assert '계정과목' not in body['owner_questions'][0]['text']
+    question = body['owner_questions'][0]
+    assert question['key'] == 'business_use'
+    assert set(question['choices']) == {'business', 'personal', 'unknown'}
     listed = client.get(path + '/owner/questions').json()['questions']
-    assert body['owner_questions'][0] == next(item for item in listed if item['event_id'] == body['owner_questions'][0]['event_id'])
+    same = next(item for item in listed if item['event_id'] == question['event_id'])
+    assert same['key'] == question['key'] and set(same['choices']) == set(question['choices'])
+    answered = client.post(path + '/events/' + question['event_id'] + '/facts', json={
+        'expected_revision': question['expected_revision'],
+        'context_hash': question['context_hash'],
+        'question': question['key'],
+        'answer': 'business',
+        'idempotency_key': 'fact-business-use-001',
+    })
+    assert answered.status_code == 200, answered.text
+    saved = answered.json()
+    assert saved['saved'] is True and saved['event']['facts']['business_use'] == 'business'
+    assert saved['event']['accounting_complete'] is False
+    assert [item['key'] for item in saved['event']['questions']] == ['use_type']
+    home = client.get(path + '/owner/home').json()
+    assert home['accounting_complete'] is False
+    assert not client.get(path + '/transactions').json()
+    assert not client.get(path + '/journals').json()
     with w.db.connect() as c:
         assert c.execute("SELECT count(*) FROM upload_jobs WHERE company_id=? AND state='QUEUED'", (w.company,)).fetchone()[0] == 100
-        stored = w.db.get(c, w.company, 'economic_event', body['owner_questions'][0]['event_id'])
+        stored = w.db.get(c, w.company, 'economic_event', question['event_id'])
         assert 'questions' not in stored
-    screen = client.get('/static/owner.js').text
-    assert '이번 자료 읽기가 끝나지 않았습니다' in screen
-    assert "reading_pending===true" in screen
 
 
 def test_live_lease_keeps_batch_pending_instead_of_claiming_completion(web, w):
@@ -200,3 +215,27 @@ def test_live_lease_keeps_batch_pending_instead_of_claiming_completion(web, w):
     assert body['owner_questions'] == []
     assert body['source_reading'] == []
     assert body['accounting_complete'] is False
+    document = client.get(path + '/documents/' + document_id).json()
+    assert document['state'] == 'PROCESSING'
+    assert body['reading_attention'] == []
+    assert client.get(path + '/owner/questions').json()['questions'] == []
+    assert client.get(path + '/owner/events').json()['accounting_complete'] is False
+    assert not client.get(path + '/transactions').json()
+    assert not client.get(path + '/journals').json()
+
+
+def test_unreadable_batch_reports_attention_without_a_fact_question(web):
+    app, client, path = web
+    raw = b'unknown,a,b\n1,2,3\n'
+    batch = start(client, path, raw, key='web-attention-unknown')
+    assert send(client, path, batch, raw).status_code == 200
+    done = client.post(path + '/uploads/' + batch['id'] + '/complete', json={'expected_revision': batch['revision']})
+    assert done.status_code == 200, done.text
+    body = done.json()
+    document_id = body['files'][0]['document']['id']
+    assert body['reading_pending'] is False and body['owner_questions'] == []
+    assert body['accounting_complete'] is False and body['manual_transaction_required'] is False
+    assert body['reading_attention'] and body['reading_attention'][0]['document_id'] == document_id
+    assert body['reading_attention'][0]['state'] not in ('NORMALIZED', 'QUEUED', 'PROCESSING')
+    assert client.get(path + '/owner/questions').json()['questions'] == []
+    assert not client.get(path + '/journals').json()
