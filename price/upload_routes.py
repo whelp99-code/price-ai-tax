@@ -49,27 +49,28 @@ def register_upload_routes(app, service, actor_dependency):
 
     @app.post(prefix + '/uploads/{batch}/complete')
     def complete_upload(company: str, batch: str, data: CompleteUploadInput, a: Actor = Depends(actor_dependency)):
-        uploads.complete(a, company, batch, data.expected_revision)
+        sealed = uploads.complete(a, company, batch, data.expected_revision)
+        document_ids = [item['document']['id'] for item in sealed['files'] if item.get('document')]
         reading = []
-        for _ in range(100):
-            step = reader.run_once(company)
-            if not step.get('processed'):
-                break
-            reading.append({key: step.get(key) for key in ('id', 'state', 'error', 'records', 'cases', 'committed')})
-        from .casework import Casework
+        for document_id in document_ids:
+            for _ in range(2):
+                step = reader.run_once(company, document_id=document_id)
+                if not step.get('processed'):
+                    break
+                reading.append({key: step.get(key) for key in ('id', 'document_id', 'state', 'error', 'records', 'cases', 'committed')})
+                if step.get('committed'):
+                    break
+        from .casework import Casework, question_views
         linked = Casework(service).refresh(a, company)
         view = uploads.get(a, company, batch)
-        questions = []
-        with service.db.connect() as c:
-            service.auth.guard(c, a, company)
-            for event in service.db.list(c, company, 'economic_event'):
-                if event.get('lifecycle') == 'SUPERSEDED':
-                    continue
-                for question in event.get('questions') or []:
-                    questions.append({'event_id': event['id'], 'question': question})
+        events = Casework(service).list(a, company)
+        questions = question_views(events, document_ids)
+        states = [item['document']['state'] for item in view['files'] if item.get('document')]
         view['source_reading'] = reading
         view['casework'] = linked
         view['owner_questions'] = questions
+        view['reading_pending'] = any(state in ('QUEUED', 'PROCESSING') for state in states) or any(not item.get('document') for item in view['files'])
+        view['reading_attention'] = [{'document_id': item['document']['id'], 'state': item['document']['state'], 'issues': item['document'].get('issues') or []} for item in view['files'] if item.get('document') and item['document']['state'] not in ('NORMALIZED', 'QUEUED', 'PROCESSING')]
         view['accounting_complete'] = False
         view['manual_transaction_required'] = False
         return view

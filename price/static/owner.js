@@ -184,9 +184,12 @@ async function uploadFiles(selected) {
       }
       batch=await post('/uploads/'+batch.id+'/complete',{expected_revision:batch.revision}); state.upload=batch;
     }
-    const questions=(batch.owner_questions||[]).length;
-    const done=questions? '확인할 사실이 '+questions+'건 있습니다.':'읽기·연결 결과를 반영했습니다.';
-    $('#transfer-progress').value=total; $('#transfer-label').textContent='자료 접수 완료'; $('#transfer-message').textContent='원본을 보관하고 '+done+' 장부 확정·세금 신고가 완료됐다는 의미는 아닙니다.'; toast('원본 자료를 접수했습니다.');
+    const questions=batch.owner_questions||[];
+    const pending=batch.reading_pending===true;
+    const attention=(batch.reading_attention||[]).length;
+    const done=pending?'이번 자료 읽기가 끝나지 않았습니다. 앞에 쌓인 다른 자료는 대신 처리하지 않았습니다.':attention?'확인이 필요한 자료가 '+attention+'개 있습니다. 읽기 완료로 표시하지 않습니다.':questions.length?'확인할 사실이 '+questions.length+'건 있습니다. '+(questions[0].text||''):'읽기·연결 결과를 반영했습니다.';
+    if(questions.length)chooseView('questions');
+    $('#transfer-progress').value=total; $('#transfer-label').textContent=pending?'자료 읽기 대기':'자료 접수 완료'; $('#transfer-message').textContent='원본을 보관하고 '+done+' 장부 확정·세금 신고가 완료됐다는 의미는 아닙니다.'; toast(pending?'원본은 보관됐고 이번 자료 읽기는 아직입니다.':'원본 자료를 접수했습니다.');
   } catch(error) { $('#transfer-message').textContent=error.name==='AbortError'?'전송을 잠시 멈췄습니다. 같은 파일을 다시 선택하면 이어서 진행합니다.':error.message; if(error.name!=='AbortError') showError(error); }
   finally { setUploading(false); $('#owner-files').value=''; await refresh().catch(showError); }
 }

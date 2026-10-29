@@ -149,3 +149,54 @@ def test_invoice_both_parties_different_from_confirmed_company(w):
     upload(w, INVOICES)
     result = Ingestion(w.svc).run_once(w.company)
     assert result['error'] == 'COMPANY_SOURCE_CONFLICT'
+
+def _confirm_buyer(client, path):
+    info = client.get(path + '/owner/onboarding').json()
+    saved = client.post(path + '/owner/onboarding', json={'expected_revision': info['revision'], 'name': '시험 회사 A', 'mode': 'company', 'business_number': '222-22-22222', 'confirmed': True, 'instruments': [{'kind': 'bank', 'identifier': '123-456-789012'}]})
+    assert saved.status_code == 200, saved.text
+
+
+def test_complete_returns_dynamic_questions_and_skips_older_queue(web, w):
+    app, client, path = web
+    _confirm_buyer(client, path)
+    for index in range(100):
+        raw = ('합성 검증용 거래내역\n계좌번호: 123-456-789012\n통화: KRW\n'
+               '거래일시,거래내용,입금액,출금액,거래후잔액\n'
+               f'2026-08-01 10:00:00,대기{index},{index + 1},0,{index + 1}\n').encode()
+        upload(w, raw, filename=f'대기{index}.csv', key=f'queued-bank-{index:03d}')
+    batch = start(client, path, INVOICES, key='web-question-invoice')
+    assert send(client, path, batch, INVOICES).status_code == 200
+    done = client.post(path + '/uploads/' + batch['id'] + '/complete', json={'expected_revision': batch['revision']})
+    assert done.status_code == 200, done.text
+    body = done.json()
+    document_id = body['files'][0]['document']['id']
+    assert body['reading_pending'] is False and body['reading_attention'] == []
+    assert body['source_reading'] and {step['document_id'] for step in body['source_reading']} == {document_id}
+    assert body['owner_questions'] and body['owner_questions'][0]['key'] == 'business_use'
+    assert '계정과목' not in body['owner_questions'][0]['text']
+    listed = client.get(path + '/owner/questions').json()['questions']
+    assert body['owner_questions'][0] == next(item for item in listed if item['event_id'] == body['owner_questions'][0]['event_id'])
+    with w.db.connect() as c:
+        assert c.execute("SELECT count(*) FROM upload_jobs WHERE company_id=? AND state='QUEUED'", (w.company,)).fetchone()[0] == 100
+        stored = w.db.get(c, w.company, 'economic_event', body['owner_questions'][0]['event_id'])
+        assert 'questions' not in stored
+    screen = client.get('/static/owner.js').text
+    assert '이번 자료 읽기가 끝나지 않았습니다' in screen
+    assert "reading_pending===true" in screen
+
+
+def test_live_lease_keeps_batch_pending_instead_of_claiming_completion(web, w):
+    app, client, path = web
+    _confirm_buyer(client, path)
+    batch = start(client, path, INVOICES, key='web-leased-invoice')
+    assert send(client, path, batch, INVOICES).status_code == 200
+    sealed = Uploads(w.svc).complete(w.owner, w.company, batch['id'], batch['revision'])
+    document_id = sealed['files'][0]['document']['id']
+    assert Ingestion(w.svc).claim(w.company, document_id)
+    done = client.post(path + '/uploads/' + batch['id'] + '/complete', json={'expected_revision': sealed['revision']})
+    assert done.status_code == 200, done.text
+    body = done.json()
+    assert body['reading_pending'] is True
+    assert body['owner_questions'] == []
+    assert body['source_reading'] == []
+    assert body['accounting_complete'] is False
