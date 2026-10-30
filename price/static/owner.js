@@ -211,4 +211,12 @@ $('#pause-transfer').addEventListener('click',()=>state.controller?.abort());
 $('#cancel-transfer').addEventListener('click',async()=>{state.controller?.abort();if(!state.upload)return;try{const b=await request(prefix('/uploads/'+state.upload.id));await post('/uploads/'+b.id+'/cancel',{expected_revision:b.revision,reason:'대표 자료함에서 전송 취소'});$('#transfer-message').textContent='전송을 취소했습니다. 이미 접수된 원본은 삭제하지 않습니다.';await refresh();}catch(error){showError(error);}});
 $('#refresh-documents').addEventListener('click',()=>refresh().catch(showError));$('#close-owner-dialog').addEventListener('click',()=>$('#owner-dialog').close());
 setInterval(()=>{if(state.company && !document.hidden)refresh().catch(()=>{});},3000);
-request('/api/session').then(acceptSession).catch(()=>showLogin());
+async function openLocalSession() {
+  try {
+    const result = await request('/api/login', {method:'POST', headers:{'content-type':'application/json'}, body:'{}'});
+    await acceptSession(result);
+  } catch {
+    showLogin();
+  }
+}
+request('/api/session').then(acceptSession).catch(() => { openLocalSession(); });
