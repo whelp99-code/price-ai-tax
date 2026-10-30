@@ -45,6 +45,19 @@ class OwnerView:
     def __init__(self, service, uploads):
         self.service, self.db, self.auth, self.uploads = service, service.db, service.auth, uploads
 
+    def _source_candidates(self, c, company):
+        candidates, company_candidates = [], []
+        for doc in c.execute('SELECT id,result FROM upload_documents WHERE company_id=? AND result IS NOT NULL ORDER BY created_at DESC LIMIT 50', (company,)):
+            info = json.loads(doc['result']).get('metadata', {})
+            if info.get('company_name') and info.get('business_number'):
+                company_candidates.append({'name': info['company_name'], 'business_number': info['business_number'], 'source_document_id': doc['id'], 'legal_registry_verified': False})
+            for kind, field in (('bank', 'account'), ('card', 'card')):
+                if info.get(field):
+                    value = re.sub(r'[ -]', '', info[field]).upper()
+                    candidates.append({'kind': kind, 'identifier': value, 'currency': info.get('currency'),
+                                       'source_document_id': doc['id'], 'ownership_verified': False})
+        return candidates, company_candidates
+
     def onboarding(self, actor, company):
         with self.db.connect() as c:
             role = self.auth.guard(c, actor, company)
@@ -52,16 +65,7 @@ class OwnerView:
             profile = json.loads(row[0])
             facts = self.db.list(c, company, 'company_facts')
             current = facts[0] if facts else None
-            candidates, company_candidates = [], []
-            for doc in c.execute('SELECT id,result FROM upload_documents WHERE company_id=? AND result IS NOT NULL ORDER BY created_at DESC LIMIT 50', (company,)):
-                info = json.loads(doc['result']).get('metadata', {})
-                if info.get('company_name') and info.get('business_number'):
-                    company_candidates.append({'name':info['company_name'],'business_number':info['business_number'],'source_document_id':doc['id'],'legal_registry_verified':False})
-                for kind, field in (('bank', 'account'), ('card', 'card')):
-                    if info.get(field):
-                        value = re.sub(r'[ -]', '', info[field]).upper()
-                        candidates.append({'kind': kind, 'identifier': value, 'currency': info.get('currency'),
-                                           'source_document_id': doc['id'], 'ownership_verified': False})
+            candidates, company_candidates = self._source_candidates(c, company)
             return {'mode': 'demo' if profile.get('demo') else 'company', 'profile_name': profile['name'],
                     'facts': current, 'revision': current['revision'] if current else 0,
                     'instrument_candidates': candidates, 'company_candidates': company_candidates, 'needs_confirmation': not bool(current),
@@ -115,13 +119,26 @@ class OwnerView:
             source_cases = c.execute("SELECT count(*) FROM objects WHERE company_id=? AND kind='ingestion_case' AND json_extract(body,'$.state')!='SUPERSEDED'", (company,)).fetchone()[0]
             legacy_cases = self.db.list(c, company, 'case')
             facts = self.db.list(c, company, 'company_facts')
+            current = facts[0] if facts else None
+            candidates, _company_candidates = self._source_candidates(c, company)
+            confirmed = {(item['kind'], re.sub(r'[ -]', '', item['identifier']).upper()) for item in (current or {}).get('instruments', [])}
+            pending_instruments, seen = [], set()
+            for item in candidates:
+                key = (item['kind'], item['identifier'])
+                if key in seen or key in confirmed:
+                    continue
+                seen.add(key)
+                pending_instruments.append(item)
+            actions = [{'kind': 'confirm_company', 'label': '회사와 계좌 정보를 확인해 주세요.'}] if not facts else []
+            if facts and pending_instruments:
+                actions.append({'kind': 'confirm_instruments', 'label': '원본에서 찾은 계좌·카드를 회사 소유인지 확인해 주세요.'})
             return {'company': {'id': company, 'name': profile['name'], 'demo': bool(profile.get('demo')), 'role': role},
                     'counts': {'documents': sum(counts.values()), 'read': counts.get('NORMALIZED', 0),
                                'reading': counts.get('QUEUED', 0) + counts.get('PROCESSING', 0), 'needs_attention': pending,
                                'source_cases': source_cases, 'posted_journals': sum(j.get('state') == 'POSTED' for j in journals),
                                'existing_review_cases': sum(x.get('state') not in ('CLOSED', 'SUPERSEDED') for x in legacy_cases)},
-                    'needs_company_confirmation': not bool(facts), 'documents': documents,
-                    'owner_actions': [{'kind': 'confirm_company', 'label': '회사와 계좌 정보를 확인해 주세요.'}] if not facts else [],
+                    'needs_company_confirmation': not bool(facts), 'pending_instrument_candidates': pending_instruments, 'documents': documents,
+                    'owner_actions': actions,
                     'accounting_complete': False, 'live_filing': False,
                     'automation_stage': 'source_reading', 'expert_connected': False,
                     'notice': '자료 읽기는 자동으로 진행합니다. 거래 연결·자동기장·세금 신고의 완료를 뜻하지 않습니다.'}

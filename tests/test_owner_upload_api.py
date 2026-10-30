@@ -239,3 +239,33 @@ def test_unreadable_batch_reports_attention_without_a_fact_question(web):
     assert body['reading_attention'][0]['state'] not in ('NORMALIZED', 'QUEUED', 'PROCESSING')
     assert client.get(path + '/owner/questions').json()['questions'] == []
     assert not client.get(path + '/journals').json()
+
+def test_owner_reopens_onboarding_to_confirm_discovered_account(web):
+    app, client, path = web
+    first = client.post(path + '/owner/onboarding', json={'expected_revision': 0, 'name': '시험 회사 A', 'mode': 'company', 'business_number': '111-11-11111', 'confirmed': True, 'instruments': []})
+    assert first.status_code == 200, first.text
+    saved = first.json()
+    batch = start(client, path, BANK, key='web-account-candidate')
+    assert send(client, path, batch, BANK).status_code == 200
+    done = client.post(path + '/uploads/' + batch['id'] + '/complete', json={'expected_revision': batch['revision']})
+    assert done.status_code == 200, done.text
+    info = client.get(path + '/owner/onboarding').json()
+    assert info['revision'] == saved['revision']
+    assert info['facts']['name'] == saved['name'] and info['facts']['business_number'] == saved['business_number']
+    assert info['facts']['instruments'] == []
+    candidate = next(item for item in info['instrument_candidates'] if item['kind'] == 'bank')
+    assert candidate['ownership_verified'] is False and candidate['identifier'] == '123456789012'
+    home = client.get(path + '/owner/home').json()
+    assert home['needs_company_confirmation'] is False
+    assert home['pending_instrument_candidates'][0]['identifier'] == candidate['identifier']
+    assert home['owner_actions'][0]['kind'] == 'confirm_instruments'
+    screen = client.get('/static/owner.js').text + client.get('/static/book_results.js').text
+    assert 'pending_instrument_candidates' in screen and 'showOnboarding' in screen
+    skipped = client.post(path + '/owner/onboarding', json={'expected_revision': info['revision'], 'name': info['facts']['name'], 'mode': info['mode'], 'business_number': info['facts']['business_number'], 'confirmed': True, 'instruments': []})
+    assert skipped.status_code == 200 and skipped.json()['instruments'] == []
+    confirmed = client.post(path + '/owner/onboarding', json={'expected_revision': skipped.json()['revision'], 'name': info['facts']['name'], 'mode': info['mode'], 'business_number': info['facts']['business_number'], 'confirmed': True, 'instruments': [{'kind': 'bank', 'identifier': candidate['identifier'], 'currency': candidate['currency']}]})
+    assert confirmed.status_code == 200, confirmed.text
+    assert confirmed.json()['name'] == saved['name'] and confirmed.json()['business_number'] == saved['business_number']
+    assert confirmed.json()['instruments'] == [{'kind': 'bank', 'identifier': candidate['identifier'], 'currency': candidate['currency']}]
+    assert client.get(path + '/owner/home').json()['pending_instrument_candidates'] == []
+    assert not client.get(path + '/journals').json()

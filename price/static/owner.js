@@ -76,8 +76,11 @@ function renderHome(home, batches) {
   $('#question-count').textContent = home.owner_actions.length ? '(' + home.owner_actions.length + ')' : '';
   renderDocuments(home, batches);
   const questions = $('#owner-questions'); questions.replaceChildren();
-  if (home.needs_company_confirmation) {
-    const card = element('div', undefined, 'note'); card.append(element('p','이 자료함의 회사와 회사 소유 계좌 정보를 확인해 주세요.'), button('회사 정보 확인', showOnboarding, 'primary')); questions.append(card);
+  const pendingInstruments = home.pending_instrument_candidates || [];
+  if (home.needs_company_confirmation || pendingInstruments.length) {
+    const card = element('div', undefined, 'note');
+    card.append(element('p', home.needs_company_confirmation ? '이 자료함의 회사와 회사 소유 계좌 정보를 확인해 주세요.' : '원본에서 계좌·카드 후보를 찾았습니다. 우리 회사 자료인 것만 선택해 주세요.'), button('회사 계좌·카드 확인', showOnboarding, 'primary'));
+    questions.append(card);
   } else questions.append(element('p','현재 대표님께 추가로 요청한 회사 사실이 없습니다.'));
   if (home.counts.needs_attention) questions.append(element('p', '자료 ' + home.counts.needs_attention + '개가 추가 확인 또는 읽기 지원을 기다립니다. 대표님께 회계 판단을 요청한 것은 아닙니다.', 'note'));
   questions.append(element('p','거래 목적은 쉬운 업무 사실로 확인합니다. 자동기장 정책·전문 검토가 아직 연결되지 않은 업무는 완료로 표시하지 않습니다.','small'));
