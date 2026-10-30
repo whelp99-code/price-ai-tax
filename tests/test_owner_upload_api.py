@@ -269,3 +269,39 @@ def test_owner_reopens_onboarding_to_confirm_discovered_account(web):
     assert confirmed.json()['instruments'] == [{'kind': 'bank', 'identifier': candidate['identifier'], 'currency': candidate['currency']}]
     assert client.get(path + '/owner/home').json()['pending_instrument_candidates'] == []
     assert not client.get(path + '/journals').json()
+
+def test_company_fact_save_resumes_questions_without_worker(web):
+    app, client, path = web
+    first = client.post(path + '/owner/onboarding', json={'expected_revision': 0, 'name': '시험 회사 A', 'mode': 'company', 'business_number': '111-11-11111', 'confirmed': True, 'instruments': []})
+    assert first.status_code == 200, first.text
+    batch = start(client, path, BANK, key='web-fact-resume')
+    assert send(client, path, batch, BANK).status_code == 200
+    done = client.post(path + '/uploads/' + batch['id'] + '/complete', json={'expected_revision': batch['revision']})
+    assert done.status_code == 200, done.text
+    document_id = done.json()['files'][0]['document']['id']
+    before = client.get(path + '/owner/questions').json()
+    assert before['questions'] == [] and before['source_changed'] == 0
+    info = client.get(path + '/owner/onboarding').json()
+    candidate = next(item for item in info['instrument_candidates'] if item['kind'] == 'bank')
+    saved = client.post(path + '/owner/onboarding', json={'expected_revision': info['revision'], 'name': info['facts']['name'], 'mode': info['mode'], 'business_number': info['facts']['business_number'], 'confirmed': True, 'instruments': [{'kind': 'bank', 'identifier': candidate['identifier'], 'currency': candidate['currency']}]})
+    assert saved.status_code == 200, saved.text
+    assert saved.json()['revision'] == info['revision'] + 1
+    assert saved.json()['casework_resume']['state'] == 'ready'
+    assert saved.json()['name'] == '시험 회사 A' and saved.json()['business_number'] == '1111111111'
+    questions = client.get(path + '/owner/questions').json()
+    events = client.get(path + '/owner/events').json()['events']
+    assert questions['source_changed'] == 0 and questions['questions']
+    assert {item['key'] for item in questions['questions']} == {'cash_reason'}
+    assert questions['questions'][0]['context_hash'] == next(event['context_hash'] for event in events if event['id'] == questions['questions'][0]['event_id'])
+    assert all(event['state'] != 'SOURCE_CHANGED' for event in events)
+    answer = questions['questions'][0]
+    posted = client.post(path + '/events/' + answer['event_id'] + '/facts', json={'expected_revision': answer['expected_revision'], 'context_hash': answer['context_hash'], 'question': 'cash_reason', 'answer': 'customer_payment', 'idempotency_key': 'fact-resume-01'})
+    assert posted.status_code == 200, posted.text
+    again = client.get(path + '/owner/onboarding').json()
+    kept = client.post(path + '/owner/onboarding', json={'expected_revision': again['revision'], 'name': again['facts']['name'], 'mode': again['mode'], 'business_number': again['facts']['business_number'], 'confirmed': True, 'instruments': again['facts']['instruments']})
+    assert kept.status_code == 200, kept.text
+    resumed = client.get(path + '/owner/events').json()['events']
+    same = next(event for event in resumed if event['id'] == answer['event_id'])
+    assert same['state'] != 'SOURCE_CHANGED' and same['facts'].get('cash_reason') == 'customer_payment'
+    assert client.get(path + '/documents/' + document_id).json()['state'] == 'NORMALIZED'
+    assert not client.get(path + '/journals').json()
