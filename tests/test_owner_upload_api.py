@@ -305,3 +305,20 @@ def test_company_fact_save_resumes_questions_without_worker(web):
     assert same['state'] != 'SOURCE_CHANGED' and same['facts'].get('cash_reason') == 'customer_payment'
     assert client.get(path + '/documents/' + document_id).json()['state'] == 'NORMALIZED'
     assert not client.get(path + '/journals').json()
+
+def test_fact_save_reports_resume_failure_without_dropping_facts(web, monkeypatch):
+    from price.casework import Casework
+    saved_name = '시험 회사 A'
+    def fail(self, c, company, actor_id):
+        raise DomainError('CASEWORK_LIMIT', '자료 규모에 맞는 분할 처리가 필요합니다.')
+    monkeypatch.setattr(Casework, '_refresh', fail)
+    app, client, path = web
+    saved = client.post(path + '/owner/onboarding', json={'expected_revision': 0, 'name': saved_name, 'mode': 'company', 'business_number': '111-11-11111', 'confirmed': True, 'instruments': []})
+    assert saved.status_code == 200, saved.text
+    resume = saved.json()['casework_resume']
+    assert resume['state'] == 'waiting' and resume['code'] == 'CASEWORK_LIMIT' and resume['updated'] is False
+    info = client.get(path + '/owner/onboarding').json()
+    assert info['facts']['name'] == saved_name and info['facts']['business_number'] == '1111111111'
+    assert not client.get(path + '/journals').json()
+    screen = client.get('/static/casework.js').text
+    assert "post('/events/refresh',{})" in screen and 'resume_error' in screen

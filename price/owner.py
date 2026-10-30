@@ -103,15 +103,23 @@ class OwnerView:
             work = Casework(self.service)
             before = {event['id']: event for event in self.db.list(c, company, 'economic_event') if event.get('lifecycle') == 'CURRENT'}
             prior_facts = [self.db.unpack(row) for row in c.execute("SELECT * FROM objects WHERE company_id=? AND kind='event_fact' AND COALESCE(json_extract(body,'$.active'),1)=1", (company,))]
-            linked = work._refresh(c, company, actor.id)
-            current_events = {event['id']: event for event in self.db.list(c, company, 'economic_event') if event.get('lifecycle') == 'CURRENT'}
-            for fact in prior_facts:
-                event = current_events.get(fact.get('event_id'))
-                old = before.get(fact.get('event_id'))
-                if not event or not old or fact.get('context_hash') != old.get('context_hash') or old.get('source_record_ids') != event.get('source_record_ids') or fact.get('context_hash') == event.get('context_hash'):
-                    continue
-                self.db.create(c, company, 'event_fact', {**payload(fact), 'context_hash': event['context_hash']})
-            resume = {'state': 'waiting', 'message': '나중에 확인된 회사 정보와 원본이 맞지 않아 거래 연결을 보류합니다.'} if affected else {'state': 'ready', 'updated': bool(linked.get('updated'))}
+            c.execute('SAVEPOINT casework_resume')
+            try:
+                linked = work._refresh(c, company, actor.id)
+                current_events = {event['id']: event for event in self.db.list(c, company, 'economic_event') if event.get('lifecycle') == 'CURRENT'}
+                for fact in prior_facts:
+                    event = current_events.get(fact.get('event_id'))
+                    old = before.get(fact.get('event_id'))
+                    if not event or not old or fact.get('context_hash') != old.get('context_hash') or old.get('source_record_ids') != event.get('source_record_ids') or fact.get('context_hash') == event.get('context_hash'):
+                        continue
+                    self.db.create(c, company, 'event_fact', {**payload(fact), 'context_hash': event['context_hash']})
+                c.execute('RELEASE SAVEPOINT casework_resume')
+            except DomainError as error:
+                c.execute('ROLLBACK TO SAVEPOINT casework_resume')
+                c.execute('RELEASE SAVEPOINT casework_resume')
+                resume = {'state': 'waiting' if error.code == 'CASEWORK_LIMIT' else 'error', 'updated': False, 'code': error.code, 'message': error.message}
+                return {**result, 'source_context_held_ids': affected, 'casework_resume': resume}
+            resume = {'state': 'waiting', 'updated': False, 'message': '나중에 확인된 회사 정보와 원본이 맞지 않아 거래 연결을 보류합니다.'} if affected else {'state': 'ready', 'updated': bool(linked.get('updated'))}
             return {**result, 'source_context_held_ids': affected, 'casework': linked, 'casework_resume': resume}
 
     def home(self, actor, company):
