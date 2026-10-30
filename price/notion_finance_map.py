@@ -9,6 +9,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Any, Mapping
+from urllib.parse import unquote, urlparse
 
 from .models import TransactionInput
 
@@ -24,6 +25,8 @@ _APPROVAL_MEMO = re.compile(r"홈택스 승인번호:\s*([0-9]{8,24})")
 _INVOICE_KEY = re.compile(r"^invoice\|([0-9]{8,24})$")
 
 SOURCE = "notion"
+ATTACHMENT = "증빙"
+_EVIDENCE_REF = "notion-file:"
 
 
 @dataclass(frozen=True)
@@ -112,6 +115,65 @@ def _approval(natural_key: str, memo: str) -> tuple[str | None, str | None]:
     return from_key or from_memo, None
 
 
+def _attachment_name(value: str) -> str:
+    text = value.strip()
+    if text.startswith(("http://", "https://")):
+        path = unquote(urlparse(text).path)
+        text = path.rsplit("/", 1)[-1].strip()
+    if not text or text in {".", ".."} or "/" in text or "\\" in text or any(ord(ch) < 32 for ch in text):
+        return ""
+    return text[:160]
+
+
+def _names_from_file_item(item: Mapping[str, Any]) -> str:
+    name = _attachment_name(str(item.get("name") or ""))
+    if name:
+        return name
+    body = item.get("file") if isinstance(item.get("file"), Mapping) else item.get("external")
+    if not isinstance(body, Mapping):
+        return ""
+    return _attachment_name(str(body.get("url") or ""))
+
+
+def _attachment_refs(page_id: str, props: Mapping[str, Any]) -> list[str] | Hold:
+    """Read the Notion files property. Never stores a signed URL or an amount."""
+    raw = props.get(ATTACHMENT)
+    if raw in (None, "", []):
+        return []
+    names: list[str] = []
+    if isinstance(raw, Mapping):
+        if raw.get("type") not in (None, "files") or not isinstance(raw.get("files"), list):
+            return Hold(page_id, "", "attachment property unreadable; not fixed")
+        if raw.get("has_more"):
+            return Hold(page_id, "", "attachment list incomplete; not fixed")
+        items = raw.get("files") or []
+        for item in items:
+            if not isinstance(item, Mapping):
+                return Hold(page_id, "", "attachment property unreadable; not fixed")
+            names.append(_names_from_file_item(item))
+    elif isinstance(raw, list):
+        for item in raw:
+            if isinstance(item, str):
+                names.append(_attachment_name(item))
+            elif isinstance(item, Mapping):
+                names.append(_names_from_file_item(item))
+            else:
+                return Hold(page_id, "", "attachment property unreadable; not fixed")
+    elif isinstance(raw, str):
+        names.append(_attachment_name(raw))
+    else:
+        return Hold(page_id, "", "attachment property unreadable; not fixed")
+    if any(not name for name in names):
+        return Hold(page_id, "", "attachment without name; not fixed")
+    if len(names) > 30:
+        return Hold(page_id, "", "more than 30 attachments; not fixed")
+    refs: list[str] = []
+    for name in names:
+        ref = f"{_EVIDENCE_REF}{page_id}:{name}"
+        if ref not in refs:
+            refs.append(ref)
+    return refs
+
 def _counterparty(props: Mapping[str, Any]) -> str:
     named = props.get("거래처")
     if isinstance(named, str) and named.strip():
@@ -186,6 +248,9 @@ def map_row(row: Mapping[str, Any]) -> Mapped | Hold:
     keys = {"notion-page": page_id}
     if approval:
         keys["hometax-approval"] = approval
+    evidence = _attachment_refs(page_id, props)
+    if isinstance(evidence, Hold):
+        return Hold(page_id, classification, evidence.reason, net, tax, gross)
     draft = TransactionInput(
         external_id=f"notion-page:{page_id}",
         source=SOURCE,
@@ -198,6 +263,7 @@ def map_row(row: Mapping[str, Any]) -> Mapped | Hold:
         gross=gross,
         tax_category=tax_category,
         deductible=None,
+        evidence_ids=evidence,
     )
     return Mapped(page_id, classification, kind, direction, net, tax, gross, approval, keys, draft)
 

@@ -134,3 +134,21 @@ def test_missing_bank_tax_is_zero_not_invented_invoice_tax():
     assert not bank.held and bank.tax == 0
     invoice = map_row(_row(부가세=None))
     assert invoice.held and "not fixed" in invoice.reason
+
+def test_attachment_property_becomes_evidence_ref_without_amount_or_url():
+    page = "page-attach"
+    bare = map_row(_row(page=page))
+    signed = "https://files.example.test/workspace/page/invoice.pdf?X-Amz-Signature=secret"
+    attached = map_row(_row(page=page, 증빙=[{"name": "invoice.pdf", "type": "file", "file": {"url": signed, "expiry_time": "2026-10-31T00:00:00.000Z"}}]))
+    assert not attached.held
+    assert attached.draft.evidence_ids == [f"notion-file:{page}:invoice.pdf"]
+    assert attached.net == bare.net and attached.tax == bare.tax and attached.gross == bare.gross
+    assert "X-Amz" not in attached.draft.evidence_ids[0]
+    assert "secret" not in attached.draft.evidence_ids[0]
+    flattened = map_row(_row(page=page, 증빙=[signed, "receipt.json"]))
+    assert flattened.draft.evidence_ids == [f"notion-file:{page}:invoice.pdf", f"notion-file:{page}:receipt.json"]
+    empty = map_row(_row(page=page, 증빙={"type": "files", "files": [], "has_more": False}))
+    assert empty.draft.evidence_ids == []
+    incomplete = map_row(_row(page=page, 증빙={"type": "files", "files": [{"name": "partial.pdf"}], "has_more": True}))
+    assert incomplete.held and "not fixed" in incomplete.reason
+    assert incomplete.gross == bare.gross

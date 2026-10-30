@@ -134,3 +134,19 @@ def test_disappeared_page_is_reported_not_deleted(scratch):
     with db.connect() as c:
         n = c.execute("SELECT count(*) FROM objects WHERE kind='transaction'").fetchone()[0]
     assert n == 1
+
+def test_attachment_ref_is_stored_without_rewriting_amount(scratch):
+    db, svc, company, actor = scratch
+    row = _row("page-attach")
+    row["properties"]["증빙"] = ["https://files.example.test/invoice.pdf?X-Amz-Signature=secret"]
+    result = _apply(db, actor, company, [row])
+    assert result["inserted"] == 1 and result["journals"] == 0 and result["quarantined"] == 0
+    again = _apply(db, actor, company, [row])
+    assert again["inserted"] == 0 and again["updated"] == 0 and again["journals"] == 0
+    with db.connect() as c:
+        body = json.loads(c.execute("SELECT body FROM objects WHERE kind='transaction'").fetchone()["body"])
+        blobs = c.execute("SELECT count(*) FROM blobs").fetchone()[0]
+    assert body["evidence_ids"] == ["notion-file:page-attach:invoice.pdf"]
+    assert body["net"] == 1000 and body["tax"] == 100 and body["gross"] == 1100
+    assert blobs == 0
+    assert "secret" not in json.dumps(body["evidence_ids"])
