@@ -21,7 +21,7 @@ async function renderBookResults(){
  if(report.blockers.length){cards.append(element('p','아직 '+report.blockers.length+'개의 확인사항이 있어 잠정 결과입니다.','note'));for(const blocker of report.blockers.slice(0,5))cards.append(element('p',blocker.message||'원본과 장부 연결을 확인하고 있습니다.','small'));}
  cards.append(element('p','통장에 들어온 금액과 매출은 다를 수 있습니다. 기초자료가 미확인일 때 잔액을 0원으로 표시하지 않습니다.','small'));
  const available=bookPanel('owner-source-availability','올린 자료의 조회 범위');
- if(availability.needs_company_facts)available.append(element('p','먼저 자료함의 회사 계좌·카드 정보를 사실 확인해 주세요.'));
+ if(availability.needs_company_facts){available.append(element('p','먼저 자료함의 회사 계좌·카드 정보를 사실 확인해 주세요.'));available.append(button('회사 계좌·카드 확인',showOnboarding,'primary'));}
  for(const item of availability.instruments){const messages={NO_FILES:'아직 원본 없음',QUERY_RANGE_NOT_ESTABLISHED:'조회기간 확인 필요',READING_OR_REVIEW:'자료 읽기·확인 대기',PRINTED_RANGE_PRESENT:'전체 조회기간이 표시된 자료 있음',MASKED_INSTRUMENT_REVIEW:'마스킹된 계좌·카드 구분 필요'};available.append(element('strong',item.instrument_label+' · '+messages[item.status]),element('p',item.owner_request,'small'));}
  if(availability.partial_listing)available.append(element('p','표시 한도를 넘는 자료가 있어 이 목록은 일부입니다.','note'));
  available.append(element('p',availability.notice,'small'));

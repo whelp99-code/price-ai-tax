@@ -9,6 +9,7 @@ import sqlite3
 from pathlib import Path
 
 from .db import Database, DomainError
+from .auth import login_disabled_requested, normalize_host, public_bind_enabled, LOOPBACK_HOSTS
 from .models import CompanyInput
 from .service import Service
 
@@ -27,6 +28,12 @@ class Arguments(argparse.Namespace):
     user: str = ""
     admin: str = ""
 
+
+def reject_login_disabled_exposure(host: str) -> None:
+    if not login_disabled_requested():
+        return
+    if normalize_host(host) not in LOOPBACK_HOSTS or public_bind_enabled():
+        raise DomainError("PUBLIC_BIND_BLOCKED", "로그인 비활성화는 루프백에서만 허용되며 공개 바인딩과 함께 쓸 수 없습니다.")
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="price — standalone AI tax-agent validation release")
@@ -94,6 +101,7 @@ def main() -> None:
                 bodies: list[str] = [row[0] for row in rows]
                 profiles: list[dict[str, object]] = [json.loads(body) for body in bodies]
                 demo = any(profile.get("demo") for profile in profiles)
+            reject_login_disabled_exposure(args.host)
             if args.host not in ("127.0.0.1", "localhost", "::1") and (
                 demo or os.getenv("PRICE_ALLOW_PUBLIC_BIND") != "1" or os.getenv("PRICE_SECURE_COOKIE") != "1"
             ):

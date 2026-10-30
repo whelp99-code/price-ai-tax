@@ -5,7 +5,18 @@ async function renderBusinessFacts(){
   const token=++caseworkRenderToken,company=state.company;
   if(!company)return;
   try{
-    const [questionData,eventData]=await Promise.all([request(prefix('/owner/questions')),request(prefix('/owner/events'))]);
+    let [questionData,eventData]=await Promise.all([request(prefix('/owner/questions')),request(prefix('/owner/events'))]);
+    if(questionData.source_changed && state.caseworkResumeFor!==company){
+      state.caseworkResumeFor=company;
+      try{
+        await post('/events/refresh',{});
+        if(token!==caseworkRenderToken||company!==state.company)return;
+        [questionData,eventData]=await Promise.all([request(prefix('/owner/questions')),request(prefix('/owner/events'))]);
+      }catch(error){
+        if(company===state.company)showError(error);
+        questionData={...questionData,resume_error:error.message||'거래 연결 재개에 실패했습니다.'};
+      }
+    }
     if(token!==caseworkRenderToken||company!==state.company)return;
     let root=document.querySelector('#event-fact-questions');
     if(!root){root=element('div');root.id='event-fact-questions';document.querySelector('#owner-questions').append(root);}
@@ -30,7 +41,7 @@ async function renderBusinessFacts(){
       card.append(choices);root.append(card);
     }
     if(questionData.review_connection_needed)root.append(element('p',questionData.review_connection_needed+'개 거래는 자료 또는 전문 판단을 확인해야 합니다. 검토 담당자가 연결되지 않은 상태이며 완료로 처리하지 않습니다.','note'));
-    if(questionData.source_changed)root.append(element('p','바뀐 자료의 거래 연결을 다시 확인하고 있습니다. 이전 질문은 사용하지 않습니다.','note'));
+    if(questionData.source_changed)root.append(element('p',questionData.resume_error||'거래 연결을 다시 열지 못했습니다. 이전 질문은 사용하지 않습니다. 파일을 다시 올리지 않아도 됩니다.','note'));
     const pending=document.querySelector('#pending-summary');
     let events=document.querySelector('#economic-event-summary');
     if(!events){events=element('div');events.id='economic-event-summary';pending.append(events);}

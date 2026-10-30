@@ -45,6 +45,19 @@ class OwnerView:
     def __init__(self, service, uploads):
         self.service, self.db, self.auth, self.uploads = service, service.db, service.auth, uploads
 
+    def _source_candidates(self, c, company):
+        candidates, company_candidates = [], []
+        for doc in c.execute('SELECT id,result FROM upload_documents WHERE company_id=? AND result IS NOT NULL ORDER BY created_at DESC LIMIT 50', (company,)):
+            info = json.loads(doc['result']).get('metadata', {})
+            if info.get('company_name') and info.get('business_number'):
+                company_candidates.append({'name': info['company_name'], 'business_number': info['business_number'], 'source_document_id': doc['id'], 'legal_registry_verified': False})
+            for kind, field in (('bank', 'account'), ('card', 'card')):
+                if info.get(field):
+                    value = re.sub(r'[ -]', '', info[field]).upper()
+                    candidates.append({'kind': kind, 'identifier': value, 'currency': info.get('currency'),
+                                       'source_document_id': doc['id'], 'ownership_verified': False})
+        return candidates, company_candidates
+
     def onboarding(self, actor, company):
         with self.db.connect() as c:
             role = self.auth.guard(c, actor, company)
@@ -52,16 +65,7 @@ class OwnerView:
             profile = json.loads(row[0])
             facts = self.db.list(c, company, 'company_facts')
             current = facts[0] if facts else None
-            candidates, company_candidates = [], []
-            for doc in c.execute('SELECT id,result FROM upload_documents WHERE company_id=? AND result IS NOT NULL ORDER BY created_at DESC LIMIT 50', (company,)):
-                info = json.loads(doc['result']).get('metadata', {})
-                if info.get('company_name') and info.get('business_number'):
-                    company_candidates.append({'name':info['company_name'],'business_number':info['business_number'],'source_document_id':doc['id'],'legal_registry_verified':False})
-                for kind, field in (('bank', 'account'), ('card', 'card')):
-                    if info.get(field):
-                        value = re.sub(r'[ -]', '', info[field]).upper()
-                        candidates.append({'kind': kind, 'identifier': value, 'currency': info.get('currency'),
-                                           'source_document_id': doc['id'], 'ownership_verified': False})
+            candidates, company_candidates = self._source_candidates(c, company)
             return {'mode': 'demo' if profile.get('demo') else 'company', 'profile_name': profile['name'],
                     'facts': current, 'revision': current['revision'] if current else 0,
                     'instrument_candidates': candidates, 'company_candidates': company_candidates, 'needs_confirmation': not bool(current),
@@ -94,8 +98,29 @@ class OwnerView:
             result = self.db.replace(c, company, 'company_facts', current['id'], values, current['revision']) if current else self.db.create(c, company, 'company_facts', values)
             self.db.audit(c, company, actor.id, 'company.facts_confirmed', result['id'], {'revision': result['revision'], 'source_document_id': data.source_document_id})
             from .source_identity import hold_sources_on_fact_change
+            from .casework import Casework
             affected = hold_sources_on_fact_change(self.db, c, company, result, actor.id)
-            return {**result, 'source_context_held_ids': affected}
+            work = Casework(self.service)
+            before = {event['id']: event for event in self.db.list(c, company, 'economic_event') if event.get('lifecycle') == 'CURRENT'}
+            prior_facts = [self.db.unpack(row) for row in c.execute("SELECT * FROM objects WHERE company_id=? AND kind='event_fact' AND COALESCE(json_extract(body,'$.active'),1)=1", (company,))]
+            c.execute('SAVEPOINT casework_resume')
+            try:
+                linked = work._refresh(c, company, actor.id)
+                current_events = {event['id']: event for event in self.db.list(c, company, 'economic_event') if event.get('lifecycle') == 'CURRENT'}
+                for fact in prior_facts:
+                    event = current_events.get(fact.get('event_id'))
+                    old = before.get(fact.get('event_id'))
+                    if not event or not old or fact.get('context_hash') != old.get('context_hash') or old.get('source_record_ids') != event.get('source_record_ids') or fact.get('context_hash') == event.get('context_hash'):
+                        continue
+                    self.db.create(c, company, 'event_fact', {**payload(fact), 'context_hash': event['context_hash']})
+                c.execute('RELEASE SAVEPOINT casework_resume')
+            except DomainError as error:
+                c.execute('ROLLBACK TO SAVEPOINT casework_resume')
+                c.execute('RELEASE SAVEPOINT casework_resume')
+                resume = {'state': 'waiting' if error.code == 'CASEWORK_LIMIT' else 'error', 'updated': False, 'code': error.code, 'message': error.message}
+                return {**result, 'source_context_held_ids': affected, 'casework_resume': resume}
+            resume = {'state': 'waiting', 'updated': False, 'message': '나중에 확인된 회사 정보와 원본이 맞지 않아 거래 연결을 보류합니다.'} if affected else {'state': 'ready', 'updated': bool(linked.get('updated'))}
+            return {**result, 'source_context_held_ids': affected, 'casework': linked, 'casework_resume': resume}
 
     def home(self, actor, company):
         with self.db.connect() as c:
@@ -115,13 +140,26 @@ class OwnerView:
             source_cases = c.execute("SELECT count(*) FROM objects WHERE company_id=? AND kind='ingestion_case' AND json_extract(body,'$.state')!='SUPERSEDED'", (company,)).fetchone()[0]
             legacy_cases = self.db.list(c, company, 'case')
             facts = self.db.list(c, company, 'company_facts')
+            current = facts[0] if facts else None
+            candidates, _company_candidates = self._source_candidates(c, company)
+            confirmed = {(item['kind'], re.sub(r'[ -]', '', item['identifier']).upper()) for item in (current or {}).get('instruments', [])}
+            pending_instruments, seen = [], set()
+            for item in candidates:
+                key = (item['kind'], item['identifier'])
+                if key in seen or key in confirmed:
+                    continue
+                seen.add(key)
+                pending_instruments.append(item)
+            actions = [{'kind': 'confirm_company', 'label': '회사와 계좌 정보를 확인해 주세요.'}] if not facts else []
+            if facts and pending_instruments:
+                actions.append({'kind': 'confirm_instruments', 'label': '원본에서 찾은 계좌·카드를 회사 소유인지 확인해 주세요.'})
             return {'company': {'id': company, 'name': profile['name'], 'demo': bool(profile.get('demo')), 'role': role},
                     'counts': {'documents': sum(counts.values()), 'read': counts.get('NORMALIZED', 0),
                                'reading': counts.get('QUEUED', 0) + counts.get('PROCESSING', 0), 'needs_attention': pending,
                                'source_cases': source_cases, 'posted_journals': sum(j.get('state') == 'POSTED' for j in journals),
                                'existing_review_cases': sum(x.get('state') not in ('CLOSED', 'SUPERSEDED') for x in legacy_cases)},
-                    'needs_company_confirmation': not bool(facts), 'documents': documents,
-                    'owner_actions': [{'kind': 'confirm_company', 'label': '회사와 계좌 정보를 확인해 주세요.'}] if not facts else [],
+                    'needs_company_confirmation': not bool(facts), 'pending_instrument_candidates': pending_instruments, 'documents': documents,
+                    'owner_actions': actions,
                     'accounting_complete': False, 'live_filing': False,
                     'automation_stage': 'source_reading', 'expert_connected': False,
                     'notice': '자료 읽기는 자동으로 진행합니다. 거래 연결·자동기장·세금 신고의 완료를 뜻하지 않습니다.'}

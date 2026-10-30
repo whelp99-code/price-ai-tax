@@ -8,10 +8,11 @@ from .upload_models import MAX_CHUNK_BYTES
 from pathlib import Path
 from urllib.parse import quote, urlparse
 from fastapi import FastAPI, Depends, Request
+from pydantic import ValidationError
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
-from .auth import Actor, SESSION_SECONDS
+from .auth import Actor, SESSION_SECONDS, passwordless_login_permitted
 from .ai import Advisor
 from .db import Database, DomainError, now, uid
 from .service import Service, WRITERS
@@ -100,12 +101,32 @@ def create_app(db_path: str | Path | None = None, advisor: Advisor | None = None
     @app.get("/health")
     def health(): return {"ok": True, "project": "price", "worker": "price", "product": "AI 세무사", "version": __version__, "mode": "validation", "live_filing": False}
 
-    @app.post("/api/login")
-    def login(data: LoginInput):
-        token, a = svc.auth.login(data.username, data.password)
-        response = JSONResponse({"username": a.username, "csrf": a.csrf, "companies": svc.auth.companies(a)})
+    def session_response(token: str, actor: Actor) -> JSONResponse:
+        response = JSONResponse({"username": actor.username, "csrf": actor.csrf, "companies": svc.auth.companies(actor)})
         response.set_cookie("price_session", token, max_age=SESSION_SECONDS, httponly=True, secure=secure, samesite="strict", path="/")
         return response
+
+    @app.post("/api/login")
+    async def login(request: Request):
+        server = request.scope.get("server") or ("", None)
+        server_host = server[0] if isinstance(server, (list, tuple)) and server else ""
+        if passwordless_login_permitted(request.url.hostname, str(server_host)):
+            token, actor = svc.auth.issue_sole_owner_session()
+            return session_response(token, actor)
+        try:
+            payload = json.loads(await request.body() or b"null")
+        except json.JSONDecodeError:
+            return JSONResponse({"code": "VALIDATION_ERROR", "message": "입력 형식을 확인하세요."}, status_code=422)
+        try:
+            data = LoginInput.model_validate(payload)
+        except ValidationError as exc:
+            return JSONResponse({
+                "code": "VALIDATION_ERROR",
+                "message": "입력 형식을 확인하세요.",
+                "details": [{"field": list(err["loc"]), "message": err["msg"]} for err in exc.errors()],
+            }, status_code=422)
+        token, actor = svc.auth.login(data.username, data.password)
+        return session_response(token, actor)
 
     @app.get("/api/session")
     def session(a: Actor = Depends(actor)): return {"username": a.username, "csrf": a.csrf, "companies": svc.auth.companies(a)}
