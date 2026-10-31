@@ -63,7 +63,10 @@ def create_app(db_path: str | Path | None = None, advisor: Advisor | None = None
     app.state.db, app.state.service, app.state.filings, app.state.queue = db, svc, filing, queue
     app.add_middleware(BodyLimit)
     secure = os.getenv("PRICE_SECURE_COOKIE", "0") == "1"
-    allowed_hosts = {"localhost", "127.0.0.1", "::1", "testserver"} | {x.strip() for x in os.getenv("PRICE_ALLOWED_HOSTS", "").split(",") if x.strip()}
+    allowed_hosts = {"localhost", "127.0.0.1", "::1"}
+    if os.getenv("PRICE_ALLOW_TESTSERVER") == "1":
+        allowed_hosts.add("testserver")
+    allowed_hosts.update(part.strip() for part in os.getenv("PRICE_ALLOWED_HOSTS", "").split(",") if part.strip())
 
     @app.exception_handler(DomainError)
     async def domain_error(request, exc):
