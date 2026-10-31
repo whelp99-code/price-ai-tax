@@ -125,6 +125,28 @@ def _attachment_name(value: str) -> str:
     return text[:160]
 
 
+def _file_token(value: object) -> str:
+    text = str(value or "").strip()
+    if not text or text.startswith(("http://", "https://")):
+        return ""
+    if text in {".", ".."} or any(ch in text for ch in "/\\:?#&=") or any(ord(ch) < 32 or ch.isspace() for ch in text):
+        return ""
+    return text[:80]
+
+
+def _file_id(item: Mapping[str, Any]) -> str:
+    candidates = [item.get("id")]
+    for key in ("file", "file_upload", "external"):
+        body = item.get(key)
+        if isinstance(body, Mapping):
+            candidates.append(body.get("id"))
+    for raw in candidates:
+        token = _file_token(raw)
+        if token:
+            return token
+    return ""
+
+
 def _names_from_file_item(item: Mapping[str, Any]) -> str:
     name = _attachment_name(str(item.get("name") or ""))
     if name:
@@ -140,7 +162,7 @@ def _attachment_refs(page_id: str, props: Mapping[str, Any]) -> list[str] | Hold
     raw = props.get(ATTACHMENT)
     if raw in (None, "", []):
         return []
-    names: list[str] = []
+    found: list[tuple[str, str]] = []
     if isinstance(raw, Mapping):
         if raw.get("type") not in (None, "files") or not isinstance(raw.get("files"), list):
             return Hold(page_id, "", "attachment property unreadable; not fixed")
@@ -150,28 +172,34 @@ def _attachment_refs(page_id: str, props: Mapping[str, Any]) -> list[str] | Hold
         for item in items:
             if not isinstance(item, Mapping):
                 return Hold(page_id, "", "attachment property unreadable; not fixed")
-            names.append(_names_from_file_item(item))
+            found.append((_names_from_file_item(item), _file_id(item)))
     elif isinstance(raw, list):
         for item in raw:
             if isinstance(item, str):
-                names.append(_attachment_name(item))
+                found.append((_attachment_name(item), ""))
             elif isinstance(item, Mapping):
-                names.append(_names_from_file_item(item))
+                found.append((_names_from_file_item(item), _file_id(item)))
             else:
                 return Hold(page_id, "", "attachment property unreadable; not fixed")
     elif isinstance(raw, str):
-        names.append(_attachment_name(raw))
+        found.append((_attachment_name(raw), ""))
     else:
         return Hold(page_id, "", "attachment property unreadable; not fixed")
-    if any(not name for name in names):
+    if any(not name for name, _token in found):
         return Hold(page_id, "", "attachment without name; not fixed")
-    if len(names) > 30:
+    if len(found) > 30:
         return Hold(page_id, "", "more than 30 attachments; not fixed")
     refs: list[str] = []
-    for name in names:
-        ref = f"{_EVIDENCE_REF}{page_id}:{name}"
-        if ref not in refs:
-            refs.append(ref)
+    used: set[str] = set()
+    for index, (name, token) in enumerate(found, start=1):
+        marker = token or str(index)
+        ref = f"{_EVIDENCE_REF}{page_id}:{marker}:{name}"
+        if ref in used:
+            ref = f"{_EVIDENCE_REF}{page_id}:{index}:{marker}:{name}"
+        if ref in used:
+            return Hold(page_id, "", "attachment refs collided; not fixed")
+        used.add(ref)
+        refs.append(ref)
     return refs
 
 def _counterparty(props: Mapping[str, Any]) -> str:

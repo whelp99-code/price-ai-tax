@@ -146,7 +146,7 @@ def test_attachment_ref_is_stored_without_rewriting_amount(scratch):
     with db.connect() as c:
         body = json.loads(c.execute("SELECT body FROM objects WHERE kind='transaction'").fetchone()["body"])
         blobs = c.execute("SELECT count(*) FROM blobs").fetchone()[0]
-    assert body["evidence_ids"] == ["notion-file:page-attach:invoice.pdf"]
+    assert body["evidence_ids"] == ["notion-file:page-attach:1:invoice.pdf"]
     assert body["net"] == 1000 and body["tax"] == 100 and body["gross"] == 1100
     assert blobs == 0
     assert "secret" not in json.dumps(body["evidence_ids"])
