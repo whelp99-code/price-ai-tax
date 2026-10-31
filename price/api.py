@@ -48,6 +48,12 @@ class BodyLimit:
         await self.app(scope, replay, send)
 
 
+async def logout_without_json_body(request: Request) -> bool:
+    """Logout carries no payload. An empty body must not be rejected as non-JSON."""
+    if request.method != "POST" or request.url.path != "/api/logout":
+        return False
+    return (await request.body()).strip() in (b"", b"{}")
+
 def create_app(db_path: str | Path | None = None, advisor: Advisor | None = None) -> FastAPI:
     db = Database(db_path or os.getenv("PRICE_DB", ".data/price.sqlite3"))
     svc = Service(db, advisor)
@@ -83,7 +89,8 @@ def create_app(db_path: str | Path | None = None, advisor: Advisor | None = None
             media_type = request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
             chunk_route = is_chunk_request(request.method, request.url.path)
             if request.url.path.startswith("/api/") and media_type != ("application/octet-stream" if chunk_route else "application/json"):
-                return JSONResponse({"code": "BINARY_REQUIRED" if chunk_route else "JSON_REQUIRED", "message": "파일 조각은 바이너리, 나머지 변경은 JSON 요청을 사용하세요."}, status_code=415)
+                if not await logout_without_json_body(request):
+                    return JSONResponse({"code": "BINARY_REQUIRED" if chunk_route else "JSON_REQUIRED", "message": "파일 조각은 바이너리, 나머지 변경은 JSON 요청을 사용하세요."}, status_code=415)
         response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
