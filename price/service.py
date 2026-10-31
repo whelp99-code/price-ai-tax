@@ -231,7 +231,7 @@ class Service:
 
     def confirm_evidence_link(self, actor, company, ident, evidence_id, data: EvidenceLinkConfirmInput):
         with self.db.transaction() as c:
-            self.auth.guard(c, actor, company, WRITERS)
+            self.auth.guard(c, actor, company, ("owner",))
             rec = self.db.get(c, company, "transaction", ident)
             self._locked(c, company, rec["event_date"])
             links = [dict(item) for item in rec.get("evidence_links") or []]
