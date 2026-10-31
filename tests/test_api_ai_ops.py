@@ -1,4 +1,5 @@
 from __future__ import annotations
+import asyncio
 import base64
 import hashlib
 import json
@@ -11,7 +12,7 @@ import time
 import httpx
 import pytest
 from fastapi.testclient import TestClient
-from price.api import create_app
+from price.api import create_app, logout_without_json_body
 from price.ai import Advisor
 from price.auth import Auth, token_hash
 from price.db import Database, DomainError
@@ -67,6 +68,25 @@ def test_logout_without_json_body_ends_session(client):
     noisy = client.post('/api/logout', content=b'not-json', headers={'x-csrf-token': again.json()['csrf'], 'content-type': 'text/plain'})
     assert noisy.status_code == 415 and noisy.json()['code'] == 'JSON_REQUIRED'
     assert client.get('/api/session', cookies={'price_session': kept}).status_code == 200
+
+def test_logout_body_can_be_reread_after_middleware(client, monkeypatch):
+    seen = {}
+    original = logout_without_json_body
+
+    async def spy(request):
+        seen["request"] = request
+        return await original(request)
+
+    monkeypatch.setattr("price.api.logout_without_json_body", spy)
+    login = client.post("/api/login", json={"username": "test-owner", "password": PASSWORD})
+    response = client.post(
+        "/api/logout",
+        content=b"{}",
+        headers={"x-csrf-token": login.json()["csrf"], "content-type": "text/plain"},
+    )
+    assert response.status_code == 200, response.text
+    assert asyncio.run(seen["request"].body()) == b"{}"
+    assert client.get("/api/session").status_code == 401
 
 def test_request_size_is_bounded_and_errors_dont_echo_password(client):
     r=client.post('/api/login',content=b'x'*3_200_001,headers={'content-type':'application/json'})
