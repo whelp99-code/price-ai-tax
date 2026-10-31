@@ -121,8 +121,9 @@ try {
   await evaluate(`(()=>{const form=document.querySelector('#evidence-link-panel form[data-link-action="link"]');const option=[...form.evidence_id.options].find(item=>item.textContent==='확정용.txt');form.evidence_id.value=option.value;form.reason.value='화면에서 후보 연결';})()`);
   await click('#evidence-link-panel form[data-link-action="link"] button[type="submit"]');
   await wait(() => evaluate(`document.querySelector('[data-evidence-status="candidate"]')?.textContent.includes('확정용.txt')`), 'candidate visible');
-  check('empty confirm reason is blocked', await evaluate(`(()=>{const form=document.querySelector('[data-evidence-status="candidate"] form[data-link-action="confirm"]');return form.reason.value==='' && form.checkValidity()===false;})()`));
-  await evaluate(`document.querySelector('[data-evidence-status="candidate"] form[data-link-action="confirm"] textarea').value='화면에서 별도 확정'`);
+  check('empty confirm reason disables the button', await evaluate(`(()=>{const form=document.querySelector('[data-evidence-status="candidate"] form[data-link-action="confirm"]');const button=form.querySelector('button[type="submit"]');return form.reason.value==='' && button.disabled===true;})()`));
+  await evaluate(`(()=>{const form=document.querySelector('[data-evidence-status="candidate"] form[data-link-action="confirm"]');form.reason.value='화면에서 별도 확정';form.reason.dispatchEvent(new Event('input',{bubbles:true}));})()`);
+  check('confirm button enables after a reason', await evaluate(`document.querySelector('[data-evidence-status="candidate"] form[data-link-action="confirm"] button[type="submit"]').disabled===false`));
   await click('[data-evidence-status="candidate"] form[data-link-action="confirm"] button[type="submit"]');
   await wait(() => evaluate(`document.querySelector('[data-evidence-status="confirmed"]')?.textContent.includes('확정용.txt')`), 'confirmed visible');
   await evaluate(`(()=>{const form=document.querySelector('#evidence-link-panel form[data-link-action="link"]');const option=[...form.evidence_id.options].find(item=>item.textContent==='후보용.txt');form.evidence_id.value=option.value;form.reason.value='화면 후보';})()`);
