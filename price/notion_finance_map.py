@@ -191,6 +191,7 @@ def _attachment_refs(page_id: str, props: Mapping[str, Any]) -> list[str] | Hold
         return Hold(page_id, "", "more than 30 attachments; not fixed")
     refs: list[str] = []
     used: set[str] = set()
+    # 순번 참조는 순서 변경 시 재생성. A Notion file id stays stable.
     for index, (name, token) in enumerate(found, start=1):
         marker = token or str(index)
         ref = f"{_EVIDENCE_REF}{page_id}:{marker}:{name}"
