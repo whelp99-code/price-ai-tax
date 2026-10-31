@@ -3,6 +3,8 @@ import base64
 import shutil
 from dataclasses import dataclass
 import pytest
+import os
+os.environ.setdefault("PRICE_ALLOW_TESTSERVER", "1")
 from price.db import Database, canonical, now, uid
 from price.auth import Actor
 from price.service import Service
