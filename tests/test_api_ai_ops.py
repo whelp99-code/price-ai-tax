@@ -49,6 +49,25 @@ def test_cookie_csrf_origin_and_host_defences(client,w):
     assert client.post('/api/login',content='username=x',headers={'content-type':'text/plain'}).status_code==415
     assert client.post('/api/login',json={'username':'test-owner','password':PASSWORD},headers={'sec-fetch-site':'cross-site'}).status_code==403
 
+def test_logout_without_json_body_ends_session(client):
+    login = client.post('/api/login', json={'username': 'test-owner', 'password': PASSWORD})
+    assert login.status_code == 200
+    csrf = login.json()['csrf']
+    cookie = login.cookies['price_session']
+    missing_type = client.post('/api/logout', headers={'x-csrf-token': csrf})
+    assert missing_type.status_code == 200, missing_type.text
+    assert missing_type.json()['ok'] is True
+    assert client.get('/api/session').status_code == 401
+    assert client.get('/api/session', cookies={'price_session': cookie}).status_code == 401
+    again = client.post('/api/login', json={'username': 'test-owner', 'password': PASSWORD})
+    kept = again.cookies['price_session']
+    refused = client.post('/api/logout')
+    assert refused.status_code == 403 and refused.json()['code'] == 'CSRF_REJECTED'
+    assert client.get('/api/session', cookies={'price_session': kept}).status_code == 200
+    noisy = client.post('/api/logout', content=b'not-json', headers={'x-csrf-token': again.json()['csrf'], 'content-type': 'text/plain'})
+    assert noisy.status_code == 415 and noisy.json()['code'] == 'JSON_REQUIRED'
+    assert client.get('/api/session', cookies={'price_session': kept}).status_code == 200
+
 def test_request_size_is_bounded_and_errors_dont_echo_password(client):
     r=client.post('/api/login',content=b'x'*3_200_001,headers={'content-type':'application/json'})
     assert r.status_code==413
