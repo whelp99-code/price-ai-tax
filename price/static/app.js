@@ -72,4 +72,5 @@ $('#logout-button').addEventListener('click',async()=>{try{await request('/api/l
 $('#refresh-button').addEventListener('click',route);
 $('#company-select').addEventListener('change',e=>{state.company=e.target.value;state.cache={};$('#identity').textContent=`${state.session.username} · ${role()}`;route();});
 window.addEventListener('hashchange',route);
-request('/api/session').then(showWorkspace).catch(()=>showLogin());
+async function continueLocally(){try{showWorkspace(await request('/api/login',{}));}catch{showLogin();}}
+request('/api/session').then(showWorkspace).catch(()=>{void continueLocally();});

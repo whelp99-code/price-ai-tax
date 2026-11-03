@@ -9,7 +9,8 @@ def uploaded(web,w):
     assert send(client,path,batch).status_code==200
     sealed=client.post(path+'/uploads/'+batch['id']+'/complete',json={'expected_revision':batch['revision']}).json()
     doc=sealed['files'][0]['document']['id']
-    assert app.state.source_reader.run_once(w.company)['state']=='SUCCEEDED'
+    assert sealed['source_reading'][0]['state'] == 'SUCCEEDED'
+    assert app.state.source_reader.run_once(w.company)['processed'] is False
     return app,client,path,doc
 
 
