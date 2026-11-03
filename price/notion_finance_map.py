@@ -30,6 +30,15 @@ _TITLE_ISSUE_DATE = re.compile(r"\|\s*(20\d{2}-\d{2}-\d{2})\s*$")
 _APPROVAL_EXACT = re.compile(r"^[0-9]{24}$")
 _INVOICE_KEY = re.compile(r"^invoice\|([0-9]{24})$")
 
+def _rounded_ten_percent(net: int) -> int:
+    """Half-up 10 percent of net, in won."""
+    sign = -1 if net < 0 else 1
+    return sign * ((abs(net) + 5) // 10)
+
+
+def _invoice_tax_within_one_won(net: int, tax: int) -> bool:
+    return abs(tax - _rounded_ten_percent(net)) <= 1
+
 SOURCE = "notion"
 
 
@@ -226,7 +235,7 @@ def map_row(row: Mapping[str, JsonValue]) -> Mapped | Hold:
             approval_tail=approval_tail,
             approval=approval,
         )
-    if kind == "invoice" and tax * 10 != net:
+    if kind == "invoice" and not _invoice_tax_within_one_won(net, tax):
         return Hold(
             page_id,
             classification,

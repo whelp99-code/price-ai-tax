@@ -96,6 +96,16 @@ def test_zero_tax_invoice_not_guessed():
     assert held.held and "not fixed" in held.reason
 
 
+def test_invoice_tax_allows_one_won_and_holds_two() -> None:
+    within = map_row(_row(금액=1000, 부가세=99, 합계=1099, page="page-tax-minus-one"))
+    above = map_row(_row(금액=1000, 부가세=101, 합계=1101, page="page-tax-plus-one"))
+    rounded = map_row(_row(금액=276836, 부가세=27684, 합계=304520, page="page-tax-rounded"))
+    low = map_row(_row(금액=1000, 부가세=98, 합계=1098, page="page-tax-minus-two"))
+    high = map_row(_row(금액=1000, 부가세=102, 합계=1102, page="page-tax-plus-two"))
+    assert not within.held and not above.held and not rounded.held
+    assert low.held and high.held
+    assert "10 percent" in low.reason and "10 percent" in high.reason
+
 def test_event_date_from_processed_field():
     mapped = map_row(_row(**{"실제 처리일": "2026-08-13T18:58:00.000+09:00"}))
     assert mapped.draft.event_date == date(2026, 8, 13)
