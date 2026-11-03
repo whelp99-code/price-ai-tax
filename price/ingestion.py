@@ -16,11 +16,17 @@ class Ingestion:
         self.service, self.db, self.auth = service, service.db, service.auth
         self.uploads = Uploads(service)
 
-    def claim(self, company=None):
+    def claim(self, company=None, document_id=None):
         with self.db.transaction() as c:
             ts = int(time.time())
-            params = [ts] + ([company] if company else [])
-            extra = ' AND company_id=?' if company else ''
+            extra = ''
+            params = [ts]
+            if company:
+                extra += ' AND company_id=?'
+                params.append(company)
+            if document_id:
+                extra += ' AND document_id=?'
+                params.append(document_id)
             exhausted = c.execute("SELECT id,company_id,document_id FROM upload_jobs WHERE state='RUNNING' AND lease_until<? AND attempts>=3" + extra, params).fetchall()
             for job in exhausted:
                 c.execute("UPDATE upload_jobs SET state='FAILED',error='RETRY_EXHAUSTED',lease_until=0,updated_at=? WHERE id=?", (now(), job['id']))
@@ -84,8 +90,8 @@ class Ingestion:
                           {'state': result['state'], 'record_count': len(records), 'case_count': len(case_ids), 'parser': result.get('parser_version')})
             return {'processed': True, 'id': job['id'], 'state': state, 'error': error, 'records': len(records), 'cases': len(case_ids), 'committed': True}
 
-    def run_once(self, company=None):
-        job = self.claim(company)
+    def run_once(self, company=None, document_id=None):
+        job = self.claim(company, document_id)
         if not job:
             return {'processed': False}
         try:
@@ -112,7 +118,9 @@ class Ingestion:
         except Exception:
             # Original source content and exception text never enter logs.
             result = {'state': 'READ_FAILED', 'records': [], 'issues': [{'code': 'READER_FAILED'}]}
-        return self.finish(job, result)
+        finished = self.finish(job, result)
+        finished['document_id'] = job['document_id']
+        return finished
 
     def records(self, actor, company, document_id, offset=0, limit=100):
         if type(offset) is not int or offset < 0 or type(limit) is not int or not 1 <= limit <= 500:

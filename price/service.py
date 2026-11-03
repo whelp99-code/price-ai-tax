@@ -8,7 +8,8 @@ import time
 from datetime import date
 from .auth import Actor, Auth
 from .db import Database, DomainError, canonical, digest, now, payload, uid
-from .models import (TransactionInput, FactsInput, JournalInput, PeriodInput, CoverageInput,
+from .models import (TransactionInput, FactsInput, EvidenceCandidateLinkInput, EvidenceLinkConfirmInput,
+                     EvidenceLinkUnlinkInput, JournalInput, PeriodInput, CoverageInput,
                      AllocationInput, AuthorityInput, CalculationInput, UserInput, ConsultInput)
 from .evidence import decode_evidence
 from .calculations import validate_lines
@@ -193,6 +194,75 @@ class Service:
             changed = self.db.replace(c, company, "transaction", ident, values, data.expected_revision)
             self._supersede(c, company, ident)
             self.db.audit(c, company, actor.id, "transaction.facts_updated", ident, {"revision": changed["revision"], "reason": data.reason})
+            return changed
+    def _journal_snapshot(self, c, company):
+        return [(row["id"], row["revision"], row["body"]) for row in c.execute(
+            "SELECT id, revision, body FROM objects WHERE company_id=? AND kind='journal' ORDER BY id", (company,))]
+
+    def _replace_evidence_link(self, c, company, ident, rec, links, expected_revision, evidence_ids=None):
+        money = (rec["net"], rec["tax"], rec["gross"])
+        journals = self._journal_snapshot(c, company)
+        values = payload(rec)
+        values["evidence_links"] = links
+        if evidence_ids is not None:
+            values["evidence_ids"] = evidence_ids
+        changed = self.db.replace(c, company, "transaction", ident, values, expected_revision)
+        if (changed["net"], changed["tax"], changed["gross"]) != money or self._journal_snapshot(c, company) != journals:
+            raise DomainError("LEDGER_UNCHANGED_VIOLATION", "증빙 연결은 금액과 전표를 바꾸지 않습니다.")
+        return changed
+
+    def link_evidence_candidate(self, actor, company, ident, data: EvidenceCandidateLinkInput):
+        with self.db.transaction() as c:
+            self.auth.guard(c, actor, company, WRITERS)
+            rec = self.db.get(c, company, "transaction", ident)
+            self._locked(c, company, rec["event_date"])
+            self._evidence_check(c, company, [data.evidence_id])
+            if data.evidence_id in rec.get("evidence_ids", []):
+                raise DomainError("EVIDENCE_ALREADY_ATTACHED", "이미 거래 증빙으로 들어간 참조는 후보로 다시 붙이지 않습니다.")
+            links = [dict(item) for item in rec.get("evidence_links") or []]
+            if any(item["evidence_id"] == data.evidence_id for item in links):
+                raise DomainError("EVIDENCE_LINK_EXISTS", "이미 연결된 증빙입니다.")
+            if len(links) >= 30:
+                raise DomainError("EVIDENCE_LINK_LIMIT", "증빙 연결은 30건까지입니다.")
+            links.append({"evidence_id": data.evidence_id, "status": "candidate", "reason": data.reason})
+            changed = self._replace_evidence_link(c, company, ident, rec, links, data.expected_revision)
+            self.db.audit(c, company, actor.id, "transaction.evidence_candidate_linked", ident, {"evidence_id": data.evidence_id, "status": "candidate"})
+            return changed
+
+    def confirm_evidence_link(self, actor, company, ident, evidence_id, data: EvidenceLinkConfirmInput):
+        with self.db.transaction() as c:
+            self.auth.guard(c, actor, company, ("owner",))
+            rec = self.db.get(c, company, "transaction", ident)
+            self._locked(c, company, rec["event_date"])
+            links = [dict(item) for item in rec.get("evidence_links") or []]
+            found = next((item for item in links if item["evidence_id"] == evidence_id), None)
+            if found is None:
+                raise DomainError("EVIDENCE_LINK_NOT_FOUND", "연결된 증빙이 없습니다.", 404)
+            if found["status"] != "candidate":
+                raise DomainError("EVIDENCE_LINK_NOT_CANDIDATE", "후보 연결만 확정할 수 있습니다.")
+            found["status"] = "confirmed"
+            found["confirm_reason"] = data.reason
+            evidence_ids = list(rec.get("evidence_ids") or [])
+            if evidence_id not in evidence_ids:
+                evidence_ids.append(evidence_id)
+            changed = self._replace_evidence_link(c, company, ident, rec, links, data.expected_revision, evidence_ids)
+            self.db.audit(c, company, actor.id, "transaction.evidence_link_confirmed", ident, {"evidence_id": evidence_id, "status": "confirmed"})
+            return changed
+
+    def unlink_evidence_candidate(self, actor, company, ident, evidence_id, data: EvidenceLinkUnlinkInput):
+        with self.db.transaction() as c:
+            self.auth.guard(c, actor, company, WRITERS)
+            rec = self.db.get(c, company, "transaction", ident)
+            self._locked(c, company, rec["event_date"])
+            links = [dict(item) for item in rec.get("evidence_links") or []]
+            found = next((item for item in links if item["evidence_id"] == evidence_id), None)
+            if found is None:
+                raise DomainError("EVIDENCE_LINK_NOT_FOUND", "연결된 증빙이 없습니다.", 404)
+            if found["status"] != "candidate":
+                raise DomainError("EVIDENCE_LINK_NOT_CANDIDATE", "후보 연결만 해제할 수 있습니다.")
+            links = [item for item in links if item["evidence_id"] != evidence_id]
+            changed = self._replace_evidence_link(c, company, ident, rec, links, data.expected_revision)
+            self.db.audit(c, company, actor.id, "transaction.evidence_candidate_unlinked", ident, {"evidence_id": evidence_id})
             return changed
 
     def _new_journal(self, c, actor, company, data: dict, *, transaction=None, reversal_of=None):

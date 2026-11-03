@@ -43,12 +43,49 @@ else if(state.page==='ops'){await load(['jobs']);const [audit,cap]=await Promise
 if(ticket===state.loading)$('#page').innerHTML=html;}catch(err){if(ticket===state.loading)$('#page').innerHTML=`<div class="card error" role="alert">${esc(err.message)}</div>`;}}
 
 async function transactionForm(tx=null){const ev=state.cache.evidence||await get('/evidence');const fields=tx?[{name:'business_purpose',label:'업무 목적',type:'textarea',value:tx.business_purpose,full:true},{name:'tax_category',label:'세무 구분',type:'select',options:taxOptions,value:tx.tax_category},{name:'deductible',label:'매입세액 공제',type:'select',options:boolOptions,value:tx.deductible===null?'':String(tx.deductible)},evField(ev,tx.evidence_ids),reasonField()]:[{name:'external_id',label:'원본 거래 ID',value:'MANUAL-'+Date.now()},{name:'source',label:'자료 출처',value:'manual'},{name:'direction',label:'거래 방향',type:'select',options:[{value:'sale',label:'매출'},{value:'purchase',label:'매입'},{value:'receipt',label:'은행 입금'},{value:'payment',label:'은행 출금'}]},{name:'event_date',label:'거래일',type:'date',value:today()},{name:'counterparty',label:'거래처'},{name:'currency',label:'통화',value:'KRW'},{name:'net',label:'공급가액 / 은행 거래액',type:'number',value:0},{name:'tax',label:'세액 (은행 거래는 0)',type:'number',value:0},{name:'gross',label:'총액',type:'number',value:0},{name:'tax_category',label:'세무 구분',type:'select',options:taxOptions},{name:'deductible',label:'매입세액 공제',type:'select',options:boolOptions},{name:'use_type',label:'사용 목적 유형',type:'select',options:[{value:'expense',label:'업무 비용'},{value:'resale',label:'고객 납품·재판매'},{value:'asset',label:'회사 자산 · 전문 검토'},{value:'other',label:'기타 · 전문 검토'}]},{name:'related_party',label:'대표·임원 등 관련자 거래',type:'checkbox'},{name:'business_purpose',label:'업무 목적 (불명이면 비워두기)',type:'textarea',required:false,full:true},evField(ev)];formDialog(tx?'거래 사실 확인':'새 거래 입력',fields,async d=>{d.deductible=d.deductible===''?null:d.deductible==='true';if(tx){d.expected_revision=tx.revision;await post('/transactions/'+tx.id+'/facts',d);}else{d.kind=['receipt','payment'].includes(d.direction)?'bank':'invoice';await post('/transactions',d);}});if(!tx){$('#dialog-form').addEventListener('input',e=>{if(['net','tax'].includes(e.target.name)){const f=e.currentTarget;f.elements.gross.value=Number(f.elements.net.value)+Number(f.elements.tax.value);}});}}
+async function showTransactionEvidence(id){
+  if(!state.cache.evidence)state.cache.evidence=await get('/evidence');
+  const tx=await get('/transactions/'+encodeURIComponent(id));
+  const links=Array.isArray(tx.evidence_links)?tx.evidence_links:[];
+  const taken=new Set(links.map(item=>item.evidence_id));
+  const open=(state.cache.evidence||[]).filter(item=>!taken.has(item.id));
+  const label=evidenceId=>{const row=(state.cache.evidence||[]).find(item=>item.id===evidenceId);return row?row.filename:evidenceId;};
+  const mark=status=>status==='confirmed'?'<span class="badge good">확정</span>':'<span class="badge warn">후보</span>';
+  const group=status=>links.filter(item=>item.status===status).map(item=>`<li data-evidence-status="${esc(item.status)}" data-evidence-id="${esc(item.evidence_id)}"><div>${mark(item.status)} <strong>${esc(label(item.evidence_id))}</strong><p>${esc(item.reason||'')}</p>${item.confirm_reason?`<p>확정 사유: ${esc(item.confirm_reason)}</p>`:''}</div>${item.status==='candidate'&&writable()?`<button type="button" class="small secondary" data-link-action="unlink">후보 해제</button>`:''}${item.status==='candidate'&&role()==='owner'?`<form data-link-action="confirm"><label>확정 사유<textarea name="reason" required></textarea></label><button class="primary" type="submit" disabled>확정</button></form>`:''}</li>`).join('');
+  modal('거래 상세 · 증빙 연결',`<section id="evidence-link-panel" data-tx="${esc(tx.id)}" data-revision="${tx.revision}"><p>${esc(tx.counterparty)} · ${esc(tx.event_date)} · ${money(tx.gross)}원</p><h3>후보</h3>${group('candidate')?`<ul class="evidence-links">${group('candidate')}</ul>`:'<p class="empty" data-empty="candidate">연결된 후보가 없습니다.</p>'}<h3>확정</h3>${group('confirmed')?`<ul class="evidence-links">${group('confirmed')}</ul>`:'<p class="empty" data-empty="confirmed">확정된 증빙이 없습니다.</p>'}${writable()?`<form data-link-action="link"><label>증빙<select name="evidence_id" required>${open.map(item=>`<option value="${esc(item.id)}">${esc(item.filename)}</option>`).join('')||'<option value="">연결할 증빙이 없습니다</option>'}</select></label><label>후보 연결 사유<textarea name="reason" required></textarea></label><button class="primary" type="submit" ${open.length?'':'disabled'}>후보 연결</button></form>`:'<p>조회 권한으로는 연결을 바꿀 수 없습니다.</p>'}</section>`);
+  const panel=$('#evidence-link-panel');
+  panel.addEventListener('input',event=>{
+    const form=event.target.closest('form[data-link-action="confirm"]');
+    if(!form)return;
+    form.querySelector('button[type="submit"]').disabled=!(form.reason.value||'').trim();
+  });
+  const fail=err=>toast(err.message,true);
+  panel.addEventListener('submit',async event=>{
+    event.preventDefault();
+    const form=event.target,reason=(form.reason?.value||'').trim();
+    if(!reason){toast('사유를 입력하세요.',true);return;}
+    const evidenceId=form.dataset.linkAction==='link'?form.evidence_id.value:form.closest('[data-evidence-id]').dataset.evidenceId;
+    try{
+      if(form.dataset.linkAction==='link')await post('/transactions/'+encodeURIComponent(id)+'/evidence-links',{expected_revision:Number(panel.dataset.revision),evidence_id:evidenceId,reason});
+      else await post('/transactions/'+encodeURIComponent(id)+'/evidence-links/'+encodeURIComponent(evidenceId)+'/confirm',{expected_revision:Number(panel.dataset.revision),reason});
+      await showTransactionEvidence(id);
+    }catch(err){fail(err);}
+  });
+  panel.addEventListener('click',async event=>{
+    const button=event.target.closest('[data-link-action="unlink"]');
+    if(!button)return;
+    try{
+      await post('/transactions/'+encodeURIComponent(id)+'/evidence-links/'+encodeURIComponent(button.closest('[data-evidence-id]').dataset.evidenceId)+'/unlink',{expected_revision:Number(panel.dataset.revision),reason:'화면에서 후보 해제'});
+      await showTransactionEvidence(id);
+    }catch(err){fail(err);}
+  });
+}
 async function action(name,id){if(name==='upload'){formDialog('원본 증빙 보관',[{name:'file',label:'2 MB 이하 · PDF/이미지/TXT/CSV/JSON',type:'file',accept:'.pdf,.png,.jpg,.jpeg,.txt,.csv,.json',full:true}],async d=>{const f=d.file;if(!f?.size||f.size>2000000)throw new Error('파일은 2 MB 이하여야 합니다.');const bytes=new Uint8Array(await f.arrayBuffer());let s='';for(let i=0;i<bytes.length;i+=8192)s+=String.fromCharCode(...bytes.subarray(i,i+8192));await post('/evidence',{filename:f.name,content_base64:btoa(s)});},'원본 보관');}
 else if(name==='new-tx')await transactionForm();
 else if(name==='facts')await transactionForm(cached('transactions',id));
 else if(name==='csv')formDialog('CSV 거래 일괄 입력',[{name:'csv_text',label:'UTF-8 CSV (금액은 쉼표 없는 정수)',type:'textarea',full:true,value:'external_id,direction,event_date,counterparty,net,tax,gross,tax_category,business_purpose\n'}],d=>post('/imports/csv',d),'검증 후 전체 저장');
 else if(name==='analyze'||name==='enqueue'){const r=await post('/transactions/'+encodeURIComponent(id)+'/'+name);toast(name==='analyze'?'분석 상태: '+(statusNames[r.case.state]||r.case.state):'영속 작업 큐에 등록했습니다.');await route();}
-else if(name==='tx-detail'){const tx=cached('transactions',id),h=await get('/transactions/'+id+'/history');modal('거래 원본·변경 이력',detail(tx,'현재 거래')+detail(h,'이전 사실 이력'));}
+else if(name==='tx-detail')await showTransactionEvidence(id);
 else if(name==='journal-detail'){const j=cached('journals',id);modal('전표 근거',table(['계정','차변/대변','금액'],j.lines.map(l=>[esc(l.account),esc(l.side),money(l.amount)]))+detail(j));}
 else if(['validate','approve-journal','post-journal','reverse'].includes(name)){const j=cached('journals',id),act={validate:'validate','approve-journal':'approve','post-journal':'post'}[name];const fields=name==='reverse'?[{name:'event_date',label:'역분개 귀속일',type:'date',value:today()},reasonField()]:[reasonField()];formDialog({validate:'전표 검증','approve-journal':'이 버전의 전표를 독립 승인','post-journal':'승인된 전표를 원장에 확정',reverse:'원본 보존 · 새 역분개 초안'}[name],fields,d=>post('/journals/'+id+'/'+(act||'reverse'),{...d,expected_revision:j.revision}),'처리');}
 else if(name==='allocate'){const txs=state.cache.transactions;formDialog('은행 거래와 청구 거래 배분',[{name:'bank_id',label:'은행 거래',type:'select',options:options(txs.filter(t=>t.kind==='bank'),t=>t.counterparty+' / '+t.direction+' / '+money(t.gross))},{name:'invoice_id',label:'청구 거래',type:'select',options:options(txs.filter(t=>t.kind==='invoice'),t=>t.counterparty+' / '+t.direction+' / '+money(t.gross))},{name:'amount',label:'배분할 금액',type:'number'},reasonField()],d=>post('/allocations',d));}
@@ -72,4 +109,5 @@ $('#logout-button').addEventListener('click',async()=>{try{await request('/api/l
 $('#refresh-button').addEventListener('click',route);
 $('#company-select').addEventListener('change',e=>{state.company=e.target.value;state.cache={};$('#identity').textContent=`${state.session.username} · ${role()}`;route();});
 window.addEventListener('hashchange',route);
-request('/api/session').then(showWorkspace).catch(()=>showLogin());
+async function continueLocally(){try{showWorkspace(await request('/api/login',{}));}catch{showLogin();}}
+request('/api/session').then(showWorkspace).catch(()=>{void continueLocally();});
