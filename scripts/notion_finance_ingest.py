@@ -10,7 +10,7 @@ import argparse
 import json
 import os
 import sqlite3
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 from price.auth import Actor
@@ -83,6 +83,28 @@ def owner_actor(db: Database) -> tuple[str, Actor]:
         raise SystemExit("expected exactly one owner membership")
     return rows[0]["company_id"], Actor(rows[0]["id"], rows[0]["username"])
 
+def notion_page_url(page_id: str) -> str:
+    compact = page_id.replace("-", "")
+    if len(compact) == 32 and all(c in "0123456789abcdefABCDEF" for c in compact):
+        return f"https://app.notion.com/p/{compact.lower()}"
+    return f"https://app.notion.com/p/{page_id}"
+
+
+def missing_issue_date_message(mapped: object) -> str:
+    pages: list[str] = []
+    loaded = getattr(mapped, "loaded", ())
+    holds = getattr(mapped, "holds", ())
+    for item in (*loaded, *holds):
+        if getattr(item, "classification", "") != "매입":
+            continue
+        if isinstance(getattr(item, "issue_date", None), date):
+            continue
+        page_id = str(getattr(item, "page_id", "") or "")
+        pages.append(f"{page_id} {notion_page_url(page_id)}" if page_id else "page id missing")
+    listed = "; ".join(pages) if pages else "page id missing"
+    return f"purchase issue date missing; period match blocked; count={len(pages)}; {listed}"
+
+
 
 def main() -> None:
     parser = argparse.ArgumentParser()
@@ -113,7 +135,7 @@ def main() -> None:
     mapped = map_snapshot(finance, hometax)
     period_report = purchase_period_report(mapped, period) if period is not None else None
     if period_report is not None and period_report["blocked"]:
-        raise SystemExit("purchase issue date missing; period match blocked")
+        raise SystemExit(missing_issue_date_message(mapped))
     if args.backup_dir:
         backup_path = backup_sqlite(db_path, args.backup_dir)
     db = Database(db_path)
