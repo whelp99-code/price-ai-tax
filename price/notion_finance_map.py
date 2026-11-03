@@ -78,6 +78,9 @@ class MapReport:
     loaded: list[Mapped] = field(default_factory=list)
     holds: list[Hold] = field(default_factory=list)
     hometax_separate: list[dict[str, str]] = field(default_factory=list)
+    @property
+    def hold_count(self) -> int:
+        return len(self.holds)
 
     def purchase_notion_gross(self) -> int:
         total = 0
@@ -329,9 +332,9 @@ def map_snapshot(
     external_purchases = external_purchases or {}
     for row in rows:
         item = apply_external_amount_conflict(map_row(row), external_purchases)
-        report.by_class[item.classification] = report.by_class.get(item.classification, 0) + 1
         if isinstance(item, Hold):
             report.holds.append(item)
         else:
             report.loaded.append(item)
+            report.by_class[item.classification] = report.by_class.get(item.classification, 0) + 1
     return report

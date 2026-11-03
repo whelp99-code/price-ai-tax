@@ -662,9 +662,10 @@ def scope_purchase_report(report: MapReport, period: tuple[date, date]) -> MapRe
         holds=[item for item in report.holds if included(item)],
         hometax_separate=list(report.hometax_separate),
     )
-    for item in (*scoped.loaded, *scoped.holds):
+    for item in scoped.loaded:
         scoped.rows += 1
         scoped.by_class[item.classification] = scoped.by_class.get(item.classification, 0) + 1
+    scoped.rows += len(scoped.holds)
     return scoped
 
 
