@@ -181,17 +181,73 @@ def test_cli_empty_schema_never_requires_owner_creation_or_listens(readonly_fixt
 
 
 def release_smoke_python(tmp_path: Path) -> Path:
-    """Install pinned deps into a prefix. The smoke HOME hides user-site packages."""
+    """Use a prefix interpreter. The smoke HOME hides user-site packages."""
+    found = _prefix_python(tmp_path)
+    if found is not None:
+        return found
+    return _install_from_local_wheels(tmp_path)
+
+
+def _runtime_pins() -> dict[str, str]:
+    pins: dict[str, str] = {}
+    for line in (ROOT / "requirements.txt").read_text().splitlines():
+        item = line.strip()
+        if not item or item.startswith("#") or "==" not in item:
+            continue
+        name, version = item.split("==", 1)
+        pins[name.strip()] = version.strip()
+    return pins
+
+
+def _prefix_python(tmp_path: Path) -> Path | None:
+    candidates = [ROOT / ".venv" / "bin" / "python", Path(sys.executable)]
+    releases = Path.home() / ".local/share/price/releases"
+    if releases.is_dir():
+        candidates.extend(sorted(releases.glob("*/.venv/bin/python")))
+    for python in candidates:
+        if python.is_file() and _prefix_matches(python, tmp_path):
+            return python
+    return None
+
+
+def _prefix_matches(python: Path, tmp_path: Path) -> bool:
+    probe = tmp_path / "prefix-probe.py"
+    probe.write_text(
+        "import importlib.metadata as metadata\n"
+        f"expected = {_runtime_pins()!r}\n"
+        "for name, version in expected.items():\n"
+        "    if metadata.version(name) != version:\n"
+        "        raise SystemExit(1)\n",
+    )
+    result = subprocess.run(
+        [str(python), str(probe)],
+        cwd=tmp_path,
+        env={"HOME": str(tmp_path), "PATH": "/usr/bin:/bin", "PYTHONDONTWRITEBYTECODE": "1", "PIP_NO_INDEX": "1"},
+        capture_output=True, check=False, timeout=30,
+    )
+    return result.returncode == 0
+
+
+def _install_from_local_wheels(tmp_path: Path) -> Path:
+    links = [path for path in (ROOT / "wheelhouse", Path.home() / ".cache/pip/wheels") if path.is_dir()]
+    if not links:
+        raise RuntimeError("SMOKE_PYTHON_NOT_LOCAL")
     venv = tmp_path / "smoke-python"
     subprocess.run([sys.executable, "-m", "venv", str(venv)], check=True, timeout=60)
     python = venv / "bin" / "python"
+    command = [
+        str(python), "-m", "pip", "install", "--disable-pip-version-check",
+        "--require-virtualenv", "--no-index",
+    ]
+    for link in links:
+        command.extend(["--find-links", str(link)])
+    command.extend(["-r", str(ROOT / "requirements.txt")])
     subprocess.run(
-        [
-            str(python), "-m", "pip", "install", "--disable-pip-version-check",
-            "--require-virtualenv", "-r", str(ROOT / "requirements.txt"),
-        ],
-        check=True, timeout=180,
+        command, check=True, timeout=180,
+        env={"HOME": str(tmp_path), "PATH": "/usr/bin:/bin", "PIP_NO_INDEX": "1", "PIP_DISABLE_PIP_VERSION_CHECK": "1"},
     )
+    if not _prefix_matches(python, tmp_path):
+        raise RuntimeError("SMOKE_PYTHON_NOT_LOCAL")
     return python
 
 
