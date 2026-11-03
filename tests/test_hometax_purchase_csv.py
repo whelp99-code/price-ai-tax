@@ -311,7 +311,7 @@ def test_reconciliation_lists_each_hold_and_splits_totals():
     report = S2.MapReport()
     report.hometax_separate = separate
     text = S2.reconciliation(report, {approval: (100, 10, 110)}, None)
-    assert "HOLD approval…9795" in text
+    assert "홈택스에만 있음 approval…9795" in text
     assert "file=purchases.csv" in text
     assert "gross=11" in text
     assert "net=10" in text
@@ -780,8 +780,9 @@ def test_operational_reconciliation_receives_separate_and_blocks_pass(tmp_path: 
     operated.hometax_separate = separate
     text = module.reconciliation(operated, hometax, None)
     assert separate
-    assert "| hometax target vs loaded | 1100 vs 1100 | FAIL gap=0 |" in text
-    assert "PASS" not in text.split("hold_explains")[0]
+    assert "| hometax target vs loaded | 1100 vs 1100 | PASS gap=0 |" in text
+    assert "| hometax only warning | 1 | 홈택스에만 있음 |" in text
+    assert "HOLD approval…" not in text
     assert "| hometax matched approvals | 1 | purchase intersection only |" in text
     assert "| hometax matched gross | 1100 | purchase intersection only |" in text
 

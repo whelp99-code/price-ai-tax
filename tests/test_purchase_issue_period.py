@@ -199,7 +199,8 @@ def test_primary_verdict_excludes_outside_holds_and_explains_all_row_gap():
     assert "| loadable purchase gross | 1100 |" in text
     assert "| hold purchase gross | 0 |" in text
     assert "| unmatched notion purchase approvals | 0 |" in text
-    assert "| hometax target vs loaded | 1100 vs 1100 | FAIL gap=0 |" in text
+    assert "| hometax target vs loaded | 1100 vs 1100 | PASS gap=0 |" in text
+    assert "| hometax only warning | 1 | 홈택스에만 있음 |" in text
     assert "1430 vs 1100 | gap=330; separate 330 + numeric-target-minus-notion 0" in text
 
 

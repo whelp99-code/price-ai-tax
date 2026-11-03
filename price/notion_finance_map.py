@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date
 from typing import Literal
 
@@ -55,6 +55,7 @@ class Hold:
     approval: str | None = None
     counterparty: str = ""
     external_gross: int | None = None
+    supplier_biz: str = ""
 
     @property
     def held(self) -> bool:
@@ -74,6 +75,7 @@ class Mapped:
     keys: dict[str, str]
     draft: TransactionInput
     issue_date: date | None = None
+    supplier_biz: str = ""
 
     @property
     def held(self) -> bool:
@@ -118,6 +120,18 @@ def _date_from(*texts: str | None) -> date | None:
         if match:
             return date.fromisoformat(match.group(1))
     return None
+def supplier_biz_digits(props: Mapping[str, JsonValue]) -> str:
+    """10-digit supplier number only. A shorter or longer run is not a key."""
+    raw = props.get("공급자사업자등록번호") or props.get("사업자번호") or ""
+    if not raw:
+        memo = str(props.get("메모") or "")
+        labeled = re.search(
+            r"(?:공급자사업자등록번호|사업자번호)\s*[:：]\s*([0-9][0-9\- ]{8,16})",
+            memo,
+        )
+        raw = labeled.group(1) if labeled else ""
+    digits = re.sub(r"\D", "", str(raw))
+    return digits if len(digits) == 10 else ""
 def purchase_issue_date(title: str) -> date | None:
     """Original issue date at the end of 거래명. Not 실제 처리일 or createdAt."""
     match = _TITLE_ISSUE_DATE.search(title or "")
@@ -341,6 +355,11 @@ def map_snapshot(
     external_purchases = external_purchases or {}
     for row in rows:
         item = apply_external_amount_conflict(map_row(row), external_purchases)
+        properties = row.get("properties")
+        props = properties if isinstance(properties, Mapping) else row
+        biz = supplier_biz_digits(props)
+        if biz:
+            item = replace(item, supplier_biz=biz)
         if isinstance(item, Hold):
             report.holds.append(item)
         else:
