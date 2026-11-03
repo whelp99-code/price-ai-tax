@@ -180,8 +180,23 @@ def test_cli_empty_schema_never_requires_owner_creation_or_listens(readonly_fixt
     assert body["error"] == "NOT_INITIALIZED"
 
 
-def test_actual_release_health_and_cleanup(prepared: Path) -> None:
-    result = readonly_health.health_smoke(ROOT, prepared, Path(sys.executable))
+def release_smoke_python(tmp_path: Path) -> Path:
+    """Install pinned deps into a prefix. The smoke HOME hides user-site packages."""
+    venv = tmp_path / "smoke-python"
+    subprocess.run([sys.executable, "-m", "venv", str(venv)], check=True, timeout=60)
+    python = venv / "bin" / "python"
+    subprocess.run(
+        [
+            str(python), "-m", "pip", "install", "--disable-pip-version-check",
+            "--require-virtualenv", "-r", str(ROOT / "requirements.txt"),
+        ],
+        check=True, timeout=180,
+    )
+    return python
+
+
+def test_actual_release_health_and_cleanup(prepared: Path, tmp_path: Path) -> None:
+    result = readonly_health.health_smoke(ROOT, prepared, release_smoke_python(tmp_path))
     assert result["status"] == 200
     assert result["readonly_uri_proved"] is True
     assert result["fixture_unchanged"] is True
