@@ -112,6 +112,59 @@ def _csv_is_hometax_purchase(path: Path) -> bool:
     return True
 
 
+def _iso_day(raw: str) -> str:
+    text = (raw or "").strip()
+    if re.fullmatch(r"20\d{2}-\d{2}-\d{2}", text):
+        return text
+    compact = text.replace("-", "")
+    if re.fullmatch(r"20\d{6}", compact):
+        return f"{compact[0:4]}-{compact[4:6]}-{compact[6:8]}"
+    return ""
+
+
+def _biz_digits(raw: str) -> str:
+    digits = re.sub(r"\D", "", raw or "")
+    return digits if len(digits) == 10 else ""
+
+
+def _aux_key(biz: str, issue: str, gross: str) -> str:
+    day = _iso_day(issue)
+    number = _biz_digits(biz)
+    if not day or not number or not str(gross).lstrip("-").isdigit():
+        return ""
+    return f"{number}|{day}|{int(gross)}"
+
+
+def apply_auxiliary_matches(report: MapReport) -> int:
+    """Pair non-24 Hometax rows by supplier number, issue date, and gross.
+
+    A 24-digit approval is never rewritten onto this key. An unpaired row stays
+    out of holds and out of the pass gate; the caller counts it as a warning.
+    """
+    keys: set[str] = set()
+    for item in (*report.loaded, *report.holds):
+        if getattr(item, "classification", "") != "매입":
+            continue
+        if _APPROVAL_COMPACT.fullmatch(getattr(item, "approval", None) or ""):
+            continue
+        issue = getattr(item, "issue_date", None)
+        gross = getattr(item, "gross", None)
+        if not isinstance(issue, date) or isinstance(gross, bool) or not isinstance(gross, int):
+            continue
+        key = _aux_key(getattr(item, "supplier_biz", ""), issue.isoformat(), str(gross))
+        if key:
+            keys.add(key)
+    warnings = 0
+    for item in report.hometax_separate:
+        key = _aux_key(item.get("supplier_biz", ""), item.get("issue_date", ""), item.get("gross", ""))
+        if key and key in keys:
+            item["auxiliary_matched"] = "1"
+        else:
+            item["auxiliary_matched"] = "0"
+            warnings += 1
+    return warnings
+
+
 def _separate_non_digit_approval(
     path: Path,
     row: str,
@@ -121,6 +174,8 @@ def _separate_non_digit_approval(
     gross: int,
     separate: list[dict[str, str]],
     found_held: dict[str, tuple[int, int, int]],
+    supplier_biz: str = "",
+    issue_date: str = "",
 ) -> None:
     identity = _approval_identity(approval)
     amounts = (net, tax, gross)
@@ -135,6 +190,8 @@ def _separate_non_digit_approval(
             "net": str(net),
             "tax": str(tax),
             "gross": str(gross),
+            "supplier_biz": _biz_digits(supplier_biz),
+            "issue_date": _iso_day(issue_date),
             "reason": "approval is not exactly 24 digits after hyphen removal; not coerced",
         },
     )
@@ -263,7 +320,18 @@ def _read_hometax_csv(
             raise SystemExit(f"hometax csv row {index} has amounts but a blank approval")
         compact = approval_raw.replace("-", "").replace(" ", "")
         if not _APPROVAL_COMPACT.fullmatch(compact):
-            _separate_non_digit_approval(path, str(index), approval_raw, net, tax, gross, separate, found_held)
+            _separate_non_digit_approval(
+                path,
+                str(index),
+                approval_raw,
+                net,
+                tax,
+                gross,
+                separate,
+                found_held,
+                supplier_biz=row.get("공급자사업자등록번호") or "",
+                issue_date=row.get("작성일자") or "",
+            )
             continue
         _store_approval(found, compact, (net, tax, gross))
 
@@ -354,7 +422,9 @@ def _matched_purchase_approvals(report: MapReport, hometax: dict[str, tuple[int,
 
 
 def dry_run_text(report: MapReport, hometax: dict[str, tuple[int, int, int]]) -> str:
+    apply_auxiliary_matches(report)
     matched = _matched_purchase_approvals(report, hometax)
+    warnings = sum(1 for item in report.hometax_separate if item.get("auxiliary_matched") != "1")
     lines = [
         f"rows {report.rows}",
         f"class {json.dumps(report.by_class, ensure_ascii=False)}",
@@ -368,9 +438,10 @@ def dry_run_text(report: MapReport, hometax: dict[str, tuple[int, int, int]]) ->
         f"hometax_purchase_count {len(hometax)}",
         f"hometax_purchase_gross {sum(item[2] for item in hometax.values())}",
         f"hometax_matched_gross {sum(hometax[key][2] for key in matched)}",
-        f"hometax_separate_count {len(getattr(report, 'hometax_separate', []))}",
-        f"hometax_separate_gross {sum(int(item.get('gross') or 0) for item in getattr(report, 'hometax_separate', []))}",
-        f"hometax_separate_non_digit {len(getattr(report, 'hometax_separate', []))}",
+        f"hometax_separate_count {len(report.hometax_separate)}",
+        f"hometax_separate_gross {sum(int(item.get('gross') or 0) for item in report.hometax_separate)}",
+        f"hometax_separate_non_digit {len(report.hometax_separate)}",
+        f"hometax_only_warning {warnings}",
     ]
     for hold in report.holds:
         lines.append(
@@ -662,9 +733,10 @@ def scope_purchase_report(report: MapReport, period: tuple[date, date]) -> MapRe
         holds=[item for item in report.holds if included(item)],
         hometax_separate=list(report.hometax_separate),
     )
-    for item in (*scoped.loaded, *scoped.holds):
+    for item in scoped.loaded:
         scoped.rows += 1
         scoped.by_class[item.classification] = scoped.by_class.get(item.classification, 0) + 1
+    scoped.rows += len(scoped.holds)
     return scoped
 
 
@@ -708,11 +780,13 @@ def reconciliation(
             date.fromisoformat(str(period_report["period_start"])),
             date.fromisoformat(str(period_report["period_end"])),
         ))
+    apply_auxiliary_matches(report)
     hometax_gross = sum(item[2] for item in hometax.values())
     held_gross = sum(item.gross or 0 for item in report.holds if _purchase_hold(item))
     loaded_gross = report.purchase_loaded_gross()
     verdict = purchase_match_verdict(loaded_gross, hometax_gross, report.holds)
     separate = report.hometax_separate
+    warnings = [item for item in separate if item.get("auxiliary_matched") != "1"]
     purchase_holds = [item for item in report.holds if _purchase_hold(item)]
     unmatched = {
         item.approval
@@ -721,7 +795,7 @@ def reconciliation(
         and _APPROVAL_COMPACT.fullmatch(getattr(item, "approval", None) or "")
         and item.approval not in hometax
     }
-    if purchase_holds or separate or unmatched or (period_report and period_report.get("blocked")):
+    if purchase_holds or unmatched or (period_report and period_report.get("blocked")):
         verdict = {
             "status": "FAIL",
             "gap": verdict["gap"],
@@ -737,6 +811,7 @@ def reconciliation(
         f"| hometax purchase rows | {len(hometax)} | numeric approvals; letters listed separately |",
         f"| hometax purchase gross | {hometax_gross} | target |",
         f"| unmatched notion purchase approvals | {len(unmatched)} | excluded from match |",
+        f"| hometax only warning | {len(warnings)} | 홈택스에만 있음 |",
         "| hometax target vs loaded | "
         + f"{hometax_gross} vs {loaded_gross} | {verdict['status']} gap={verdict['gap']} |",
         f"| hold_explains |  | {verdict['hold_explains']} |",
@@ -776,9 +851,9 @@ def reconciliation(
             + f"{all_gross} vs {notion_gross} | gap={all_gross - notion_gross}; "
             + f"separate {separate_gross} + numeric-target-minus-notion {hometax_gross - notion_gross} |"
         )
-    for item in separate:
+    for item in warnings:
         lines.append(
-            "- HOLD approval…"
+            "- 홈택스에만 있음 approval…"
             + f"{item.get('approval_tail', '')} file={item.get('file', '')} "
             + f"row={item.get('row', '')} net={item.get('net', '')} "
             + f"tax={item.get('tax', '')} gross={item.get('gross', '')} {item.get('reason', '')}"

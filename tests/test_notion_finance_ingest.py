@@ -270,10 +270,12 @@ def test_missing_later_issue_date_rejects_before_any_write(tmp_path: Path, expli
         Service(opened).auth.bootstrap(CompanyInput(name="scratch-date"), "scratch-date", "scratch-secret-date")
     before = db_path.read_bytes() if existing_db else None
     dated = _row("page-dated", approval="202609011234567890123456")
-    missing = _row("page-missing", approval="202609021234567890123457")
+    missing = _row("00000000-0000-4000-8000-000000000001", approval="202609021234567890123457")
     missing["properties"]["거래명"] = bad_title
+    other = _row("00000000-0000-4000-8000-000000000002", approval="202609031234567890123458")
+    other["properties"]["거래명"] = "날짜 없음"
     snapshot = tmp_path / "snap.json"
-    snapshot.write_text(json.dumps({"finance": [dated, missing]}), encoding="utf-8")
+    snapshot.write_text(json.dumps({"finance": [dated, missing, other]}), encoding="utf-8")
     export = tmp_path / "exports"
     export.mkdir()
     (export / "hometax_purchase_etax_20260901_20261020.csv").write_text("승인번호,합계금액,공급가액,세액\n", encoding="utf-8")
@@ -289,9 +291,17 @@ def test_missing_later_issue_date_rejects_before_any_write(tmp_path: Path, expli
     if explicit:
         sys.argv += ["--period-start", "2026-09-01", "--period-end", "2026-10-20"]
     try:
-        with pytest.raises(SystemExit, match="purchase issue date missing"):
+        with pytest.raises(SystemExit, match="purchase issue date missing") as caught:
             with contextlib.redirect_stdout(io.StringIO()):
                 module.main()
+        message = str(caught.value)
+        assert "count=2" in message
+        assert "00000000-0000-4000-8000-000000000001 https://app.notion.com/p/00000000000040008000000000000001" in message
+        assert "00000000-0000-4000-8000-000000000002 https://app.notion.com/p/00000000000040008000000000000002" in message
+        assert "page-dated" not in message
+        assert bad_title not in message
+        assert "날짜 없음" not in message
+        assert "1100" not in message
     finally:
         sys.argv = argv
     if existing_db:

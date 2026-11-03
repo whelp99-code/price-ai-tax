@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date
 from typing import Literal
 
@@ -30,6 +30,15 @@ _TITLE_ISSUE_DATE = re.compile(r"\|\s*(20\d{2}-\d{2}-\d{2})\s*$")
 _APPROVAL_EXACT = re.compile(r"^[0-9]{24}$")
 _INVOICE_KEY = re.compile(r"^invoice\|([0-9]{24})$")
 
+def _rounded_ten_percent(net: int) -> int:
+    """Half-up 10 percent of net, in won."""
+    sign = -1 if net < 0 else 1
+    return sign * ((abs(net) + 5) // 10)
+
+
+def _invoice_tax_within_one_won(net: int, tax: int) -> bool:
+    return abs(tax - _rounded_ten_percent(net)) <= 1
+
 SOURCE = "notion"
 
 
@@ -46,6 +55,7 @@ class Hold:
     approval: str | None = None
     counterparty: str = ""
     external_gross: int | None = None
+    supplier_biz: str = ""
 
     @property
     def held(self) -> bool:
@@ -65,6 +75,7 @@ class Mapped:
     keys: dict[str, str]
     draft: TransactionInput
     issue_date: date | None = None
+    supplier_biz: str = ""
 
     @property
     def held(self) -> bool:
@@ -78,6 +89,9 @@ class MapReport:
     loaded: list[Mapped] = field(default_factory=list)
     holds: list[Hold] = field(default_factory=list)
     hometax_separate: list[dict[str, str]] = field(default_factory=list)
+    @property
+    def hold_count(self) -> int:
+        return len(self.holds)
 
     def purchase_notion_gross(self) -> int:
         total = 0
@@ -106,6 +120,18 @@ def _date_from(*texts: str | None) -> date | None:
         if match:
             return date.fromisoformat(match.group(1))
     return None
+def supplier_biz_digits(props: Mapping[str, JsonValue]) -> str:
+    """10-digit supplier number only. A shorter or longer run is not a key."""
+    raw = props.get("공급자사업자등록번호") or props.get("사업자번호") or ""
+    if not raw:
+        memo = str(props.get("메모") or "")
+        labeled = re.search(
+            r"(?:공급자사업자등록번호|사업자번호)\s*[:：]\s*([0-9][0-9\- ]{8,16})",
+            memo,
+        )
+        raw = labeled.group(1) if labeled else ""
+    digits = re.sub(r"\D", "", str(raw))
+    return digits if len(digits) == 10 else ""
 def purchase_issue_date(title: str) -> date | None:
     """Original issue date at the end of 거래명. Not 실제 처리일 or createdAt."""
     match = _TITLE_ISSUE_DATE.search(title or "")
@@ -223,7 +249,7 @@ def map_row(row: Mapping[str, JsonValue]) -> Mapped | Hold:
             approval_tail=approval_tail,
             approval=approval,
         )
-    if kind == "invoice" and tax * 10 != net:
+    if kind == "invoice" and not _invoice_tax_within_one_won(net, tax):
         return Hold(
             page_id,
             classification,
@@ -329,9 +355,14 @@ def map_snapshot(
     external_purchases = external_purchases or {}
     for row in rows:
         item = apply_external_amount_conflict(map_row(row), external_purchases)
-        report.by_class[item.classification] = report.by_class.get(item.classification, 0) + 1
+        properties = row.get("properties")
+        props = properties if isinstance(properties, Mapping) else row
+        biz = supplier_biz_digits(props)
+        if biz:
+            item = replace(item, supplier_biz=biz)
         if isinstance(item, Hold):
             report.holds.append(item)
         else:
             report.loaded.append(item)
+            report.by_class[item.classification] = report.by_class.get(item.classification, 0) + 1
     return report
