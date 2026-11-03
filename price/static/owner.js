@@ -77,8 +77,11 @@ function renderHome(home, batches) {
   $('#question-count').textContent = home.owner_actions.length ? '(' + home.owner_actions.length + ')' : '';
   renderDocuments(home, batches);
   const questions = $('#owner-questions'); questions.replaceChildren();
-  if (home.needs_company_confirmation) {
-    const card = element('div', undefined, 'note'); card.append(element('p','이 자료함의 회사와 회사 소유 계좌 정보를 확인해 주세요.'), button('회사 정보 확인', showOnboarding, 'primary')); questions.append(card);
+  const pendingInstruments = home.pending_instrument_candidates || [];
+  if (home.needs_company_confirmation || pendingInstruments.length) {
+    const card = element('div', undefined, 'note');
+    card.append(element('p', home.needs_company_confirmation ? '이 자료함의 회사와 회사 소유 계좌 정보를 확인해 주세요.' : '원본에서 계좌·카드 후보를 찾았습니다. 우리 회사 자료인 것만 선택해 주세요.'), button('회사 계좌·카드 확인', showOnboarding, 'primary'));
+    questions.append(card);
   } else questions.append(element('p','현재 대표님께 추가로 요청한 회사 사실이 없습니다.'));
   if (home.counts.needs_attention) questions.append(element('p', '자료 ' + home.counts.needs_attention + '개가 추가 확인 또는 읽기 지원을 기다립니다. 대표님께 회계 판단을 요청한 것은 아닙니다.', 'note'));
   questions.append(element('p','거래 목적은 쉬운 업무 사실로 확인합니다. 자동기장 정책·전문 검토가 아직 연결되지 않은 업무는 완료로 표시하지 않습니다.','small'));
@@ -145,7 +148,7 @@ async function showOnboarding() {
   const confirmation = element('label',undefined,'check'), agree = document.createElement('input'); agree.type='checkbox'; agree.required=true; agree.name='confirmed';
   confirmation.append(agree, document.createTextNode('위 내용이 회사의 실제 정보임을 확인했습니다.')); form.append(confirmation);
   const submit = element('button','확인한 사실 저장','primary'); submit.type='submit'; form.append(submit);
-  form.addEventListener('submit', async event => { event.preventDefault(); submit.disabled=true; try { await post('/owner/onboarding',{expected_revision:current.revision,name:name.value,business_number:number.value,mode:current.mode,source_document_id:candidate?.source_document_id||null,instruments:checks.filter(x=>x.box.checked).map(x=>({kind:x.instrument.kind,identifier:x.instrument.identifier,currency:x.instrument.currency||null})),confirmed:agree.checked}); $('#owner-dialog').close(); await refresh(); toast('회사 사실을 저장했습니다.'); } catch(error){$('#owner-dialog-error').textContent=error.message;} finally{submit.disabled=false;} });
+  form.addEventListener('submit', async event => { event.preventDefault(); submit.disabled=true; try { const saved = await post('/owner/onboarding',{expected_revision:current.revision,name:name.value,business_number:number.value,mode:current.mode,source_document_id:candidate?.source_document_id||null,instruments:checks.filter(x=>x.box.checked).map(x=>({kind:x.instrument.kind,identifier:x.instrument.identifier,currency:x.instrument.currency||null})),confirmed:agree.checked}); $('#owner-dialog').close(); state.caseworkResumeFor=''; await refresh(); if (saved.casework_resume && saved.casework_resume.state !== 'ready') showError(new Error(saved.casework_resume.message || '바뀐 자료의 거래 연결을 다시 확인하지 못했습니다.')); else toast('회사 사실을 저장했습니다.'); } catch(error){$('#owner-dialog-error').textContent=error.message;} finally{submit.disabled=false;} });
   root.append(form);
 }
 async function sha256(buffer) { if (!crypto.subtle) throw new Error('안전한 파일 해시 기능을 사용할 수 있는 브라우저가 필요합니다.'); const hash = await crypto.subtle.digest('SHA-256', buffer); return Array.from(new Uint8Array(hash), n=>n.toString(16).padStart(2,'0')).join(''); }
@@ -185,7 +188,12 @@ async function uploadFiles(selected) {
       }
       batch=await post('/uploads/'+batch.id+'/complete',{expected_revision:batch.revision}); state.upload=batch;
     }
-    $('#transfer-progress').value=total; $('#transfer-label').textContent='자료 접수 완료'; $('#transfer-message').textContent='원본을 보관하고 읽기 작업을 등록했습니다. 장부·세금 처리가 완료됐다는 의미는 아닙니다.'; toast('원본 자료를 접수했습니다.');
+    const questions=batch.owner_questions||[];
+    const pending=batch.reading_pending===true;
+    const attention=(batch.reading_attention||[]).length;
+    const done=pending?'이번 자료 읽기가 끝나지 않았습니다. 앞에 쌓인 다른 자료는 대신 처리하지 않았습니다.':attention?'확인이 필요한 자료가 '+attention+'개 있습니다. 읽기 완료로 표시하지 않습니다.':questions.length?'확인할 사실이 '+questions.length+'건 있습니다. '+(questions[0].text||''):'읽기·연결 결과를 반영했습니다.';
+    if(questions.length)chooseView('questions');
+    $('#transfer-progress').value=total; $('#transfer-label').textContent=pending?'자료 읽기 대기':'자료 접수 완료'; $('#transfer-message').textContent='원본을 보관하고 '+done+' 장부 확정·세금 신고가 완료됐다는 의미는 아닙니다.'; toast(pending?'원본은 보관됐고 이번 자료 읽기는 아직입니다.':'원본 자료를 접수했습니다.');
   } catch(error) { $('#transfer-message').textContent=error.name==='AbortError'?'전송을 잠시 멈췄습니다. 같은 파일을 다시 선택하면 이어서 진행합니다.':error.message; if(error.name!=='AbortError') showError(error); }
   finally { setUploading(false); $('#owner-files').value=''; await refresh().catch(showError); }
 }
@@ -204,4 +212,12 @@ $('#pause-transfer').addEventListener('click',()=>state.controller?.abort());
 $('#cancel-transfer').addEventListener('click',async()=>{state.controller?.abort();if(!state.upload)return;try{const b=await request(prefix('/uploads/'+state.upload.id));await post('/uploads/'+b.id+'/cancel',{expected_revision:b.revision,reason:'대표 자료함에서 전송 취소'});$('#transfer-message').textContent='전송을 취소했습니다. 이미 접수된 원본은 삭제하지 않습니다.';await refresh();}catch(error){showError(error);}});
 $('#refresh-documents').addEventListener('click',()=>refresh().catch(showError));$('#close-owner-dialog').addEventListener('click',()=>$('#owner-dialog').close());
 setInterval(()=>{if(state.company && !document.hidden)refresh().catch(()=>{});},3000);
-request('/api/session').then(acceptSession).catch(()=>showLogin());
+async function openLocalSession() {
+  try {
+    const result = await request('/api/login', {method:'POST', headers:{'content-type':'application/json'}, body:'{}'});
+    await acceptSession(result);
+  } catch {
+    showLogin();
+  }
+}
+request('/api/session').then(acceptSession).catch(() => { openLocalSession(); });

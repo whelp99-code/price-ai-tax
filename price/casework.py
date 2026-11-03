@@ -115,6 +115,19 @@ def event_shape(records,profile):
             'evidence_ids':sorted({r['evidence_id'] for r in records}), 'document_ids':sorted({r['document_id'] for r in records}),
             'issues':sorted(set(issues)), 'algorithm_version':VERSION, 'accounting_complete':False,
             'source_signature_verified':False, 'source_statutory_validated':False}
+def question_views(events, document_ids=None):
+    if document_ids is not None:
+        wanted=set(document_ids)
+        events=[event for event in events if wanted.intersection(event.get('document_ids') or [])]
+    questions=[]
+    for event in events:
+        values=event.get('values') or {}
+        for question in event.get('questions') or []:
+            questions.append({'event_id':event['id'],'expected_revision':event['revision'],'context_hash':event['context_hash'],
+                              'date':values.get('date'),'gross':values.get('gross'),'currency':values.get('currency'),
+                              'counterparty':event.get('display_counterparty'),**question})
+    return questions
+
 
 
 class Casework:

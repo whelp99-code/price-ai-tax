@@ -100,6 +100,21 @@ class EvidenceInput(Input):
     content_base64: Annotated[str, Field(min_length=1, max_length=3_000_000)]
 
 
+class EvidenceCandidateLinkInput(Input):
+    expected_revision: Annotated[StrictInt, Field(gt=0)]
+    evidence_id: Annotated[str, Field(min_length=1, max_length=160)]
+    reason: Text
+
+
+class EvidenceLinkConfirmInput(Input):
+    expected_revision: Annotated[StrictInt, Field(gt=0)]
+    reason: Text
+
+
+class EvidenceLinkUnlinkInput(Input):
+    expected_revision: Annotated[StrictInt, Field(gt=0)]
+    reason: Annotated[str, Field(max_length=2000)] = ""
+
 class PeriodInput(Input):
     label: Annotated[str, Field(min_length=1, max_length=120)]
     start: date
