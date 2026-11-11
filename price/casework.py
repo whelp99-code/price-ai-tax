@@ -98,6 +98,8 @@ def event_shape(records,profile):
     issues=[]
     if identity_conflict:issues.append('SOURCE_IDENTITY_CONFLICT')
     if not v['currency']:issues.append('CURRENCY_UNCONFIRMED')
+    from .source_identity import krw_fraction_fields
+    if krw_fraction_fields(records, v.get('currency')):issues.append('KRW_FRACTION_REVIEW')
     if v['gross'] is None:issues.append('AMOUNT_UNCONFIRMED')
     if ownership=='unconfirmed':issues.append('OWNERSHIP_UNCONFIRMED')
     if v['gross'] is not None and Decimal(v['gross'])<0:issues.append('CORRECTION_REVIEW')

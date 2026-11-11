@@ -219,7 +219,7 @@ class OwnerView:
 
     def confirm_document_context(self, actor, company, document_id, data: DocumentContextInput):
         data = DocumentContextInput.model_validate(data)
-        from .source_identity import confirmed_bank_identifiers, context_conflicts, masked_identifier, missing_bank_fields
+        from .source_identity import confirmed_bank_identifiers, context_conflicts, krw_fraction_fields, masked_identifier, missing_bank_fields
         key = 'docctxreq_' + digest({'company': company, 'key': data.idempotency_key})
         request_hash = digest({'document': document_id, **data.model_dump()})
         with self.db.transaction() as c:
@@ -256,6 +256,8 @@ class OwnerView:
             conflicts = context_conflicts(records, data.identifier, data.currency)
             if conflicts:
                 raise DomainError('DOCUMENT_CONTEXT_CONFLICT', '원본의 계좌·통화 또는 가려진 식별과 충돌하는 확인은 적용하지 않습니다.', details=conflicts)
+            if krw_fraction_fields(records, data.currency):
+                raise DomainError('KRW_FRACTION_REVIEW', '원화로 확인한 금액에 소수 단위가 있습니다. 원본은 바꾸지 않으며 이 확인은 적용하지 않습니다.')
             ident = 'docctx_' + digest({'company': company, 'document': document_id})
             existing = c.execute("SELECT 1 FROM objects WHERE company_id=? AND kind='document_source_context' AND id=?", (company, ident)).fetchone()
             current = self.db.get(c, company, 'document_source_context', ident) if existing else None

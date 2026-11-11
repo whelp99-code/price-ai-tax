@@ -1,5 +1,6 @@
 """Pure factual source-to-company constraints, not a legal identity check."""
 from __future__ import annotations
+from decimal import Decimal, InvalidOperation
 import re
 
 
@@ -121,6 +122,24 @@ def context_is_usable(confirmation, source_hash, generation, records):
         return False
     return bool(missing_bank_fields(records))
 
+
+def krw_fraction_fields(records, currency):
+    if str(currency or '').upper() != 'KRW':
+        return []
+    found = []
+    for record in records:
+        values = record.get('values') or {}
+        for field in ('credit', 'debit', 'net', 'tax', 'gross', 'balance'):
+            raw = values.get(field)
+            if raw is None or raw == '':
+                continue
+            try:
+                amount = Decimal(str(raw))
+            except InvalidOperation:
+                continue
+            if amount != amount.to_integral_value():
+                found.append(field)
+    return found
 
 def overlay_owner_context(record, confirmation):
     if record.get('kind') != 'bank_statement' or not confirmation or confirmation.get('document_id') != record.get('document_id'):

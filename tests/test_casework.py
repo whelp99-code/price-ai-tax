@@ -171,6 +171,7 @@ def test_event_list_reads_current_source_snapshot_only_once(w,monkeypatch):
 
 BARE = ('거래일시,거래내용,입금액,출금액,거래후잔액,거래번호\n'
         '2026-09-03 10:00:00,용역대금,1100,0,1100,SYN-BARE-1\n').encode()
+FRACTION_BARE = BARE.replace(b'1100,0,1100', b'1.25,0,1.25')
 MASKED_ACCOUNT = ('거래일시,거래내용,입금액,출금액,계좌번호,거래번호\n'
                   '2026-09-03 10:00:00,용역대금,1100,0,1234****9012,SYN-MASK-1\n').encode()
 OTHER_ACCOUNT = ('거래일시,거래내용,입금액,출금액,계좌번호,거래번호\n'
@@ -251,6 +252,28 @@ def test_missing_context_stays_unresolved_until_document_confirmation(w):
     with w.db.connect() as c:
         assert not w.db.list(c, w.company, 'journal')
         assert any(row['action'] == 'document.context_confirmed' for row in c.execute('SELECT action FROM audit WHERE company_id=?', (w.company,)))
+
+def test_later_krw_confirmation_rejects_fractional_won_without_changing_source(w):
+    reader = Ingestion(w.svc)
+    facts(w, reader)
+    _reader, document = read_document(w, FRACTION_BARE, 'fraction-bare-1')
+    assert document['state'] == 'NORMALIZED'
+    work = Casework(w.svc)
+    work.refresh(w.owner, w.company)
+    before = work.list(w.owner, w.company)[0]
+    assert before['questions'] == [] and 'CURRENCY_UNCONFIRMED' in before['issues']
+    with pytest.raises(DomainError) as error:
+        confirm_context(w, reader, document, key='doc-context-fraction')
+    assert error.value.code == 'KRW_FRACTION_REVIEW'
+    event = work.list(w.owner, w.company)[0]
+    assert event['questions'] == [] and event['values']['currency'] is None
+    assert event['values']['gross'] == '1.25'
+    rows = reader.records(w.owner, w.company, document['id'])['rows']
+    assert rows[0]['values']['currency'] is None and rows[0]['values']['gross'] == '1.25'
+    with w.db.connect() as c:
+        assert not w.db.list(c, w.company, 'document_source_context')
+        assert not w.db.list(c, w.company, 'journal')
+        assert c.execute('SELECT content FROM blobs WHERE company_id=? AND sha256=?', (w.company, document['sha256'])).fetchone()['content'] == FRACTION_BARE
 
 
 def test_document_context_rejects_cross_company_viewer_and_stale_bindings(w):
