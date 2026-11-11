@@ -275,6 +275,20 @@ def test_later_krw_confirmation_rejects_fractional_won_without_changing_source(w
         assert not w.db.list(c, w.company, 'journal')
         assert c.execute('SELECT content FROM blobs WHERE company_id=? AND sha256=?', (w.company, document['sha256'])).fetchone()['content'] == FRACTION_BARE
 
+def test_later_non_krw_confirmation_keeps_fractional_amount_and_resumes_questions(w):
+    reader = Ingestion(w.svc)
+    facts(w, reader)
+    _reader, document = read_document(w, FRACTION_BARE, 'fraction-usd-1')
+    work = Casework(w.svc)
+    work.refresh(w.owner, w.company)
+    confirmed = confirm_context(w, reader, document, currency='USD', key='doc-context-fraction-usd')
+    assert confirmed['currency'] == 'USD' and confirmed['applied_to_original'] is False
+    event = work.list(w.owner, w.company)[0]
+    assert event['issues'] == [] and event['questions'][0]['key'] == 'cash_reason'
+    assert event['values']['currency'] == 'USD' and event['values']['gross'] == '1.25'
+    rows = reader.records(w.owner, w.company, document['id'])['rows']
+    assert rows[0]['values']['currency'] is None and rows[0]['values']['gross'] == '1.25'
+
 
 def test_document_context_rejects_cross_company_viewer_and_stale_bindings(w):
     reader = Ingestion(w.svc)
