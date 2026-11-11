@@ -3,7 +3,7 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 from pydantic import ValidationError
 from price.casework import Casework, FactAnswer
-from price.owner import OwnerView, CompanyFactsInput
+from price.owner import OwnerView, CompanyFactsInput, DocumentContextInput
 from price.ingestion import Ingestion
 from price.extractions import Extractions,ReprocessInput
 from price.db import DomainError
@@ -168,3 +168,190 @@ def test_event_list_reads_current_source_snapshot_only_once(w,monkeypatch):
     monkeypatch.setattr(work,'_current',counted)
     events=work.list(w.owner,w.company)
     assert len(events)==5 and calls==[w.company]
+
+BARE = ('거래일시,거래내용,입금액,출금액,거래후잔액,거래번호\n'
+        '2026-09-03 10:00:00,용역대금,1100,0,1100,SYN-BARE-1\n').encode()
+MASKED_ACCOUNT = ('거래일시,거래내용,입금액,출금액,계좌번호,거래번호\n'
+                  '2026-09-03 10:00:00,용역대금,1100,0,1234****9012,SYN-MASK-1\n').encode()
+OTHER_ACCOUNT = ('거래일시,거래내용,입금액,출금액,계좌번호,거래번호\n'
+                 '2026-09-03 10:00:00,용역대금,1100,0,999888777666,SYN-OTHER-1\n').encode()
+
+
+def facts(w, reader, instruments=None):
+    return OwnerView(w.svc, reader.uploads).confirm(w.owner, w.company, CompanyFactsInput(
+        expected_revision=0, name='시험 회사 A', business_number='2222222222', mode='company', confirmed=True,
+        instruments=instruments if instruments is not None else [{'kind': 'bank', 'identifier': '123456789012', 'currency': 'KRW'}]))
+
+
+def read_document(w, raw, key):
+    reader = Ingestion(w.svc)
+    batch = upload(w, raw, key=key)
+    while reader.run_once(w.company)['processed']:
+        pass
+    document = reader.uploads.document(w.owner, w.company, batch['files'][0]['document']['id'])
+    return reader, document
+
+
+def confirm_context(w, reader, document, currency='KRW', identifier='123456789012', key='doc-context-0001', expected_context_revision=0, generation=None, source_hash=None, expected_revision=None):
+    data = DocumentContextInput(
+        expected_revision=document['revision'] if expected_revision is None else expected_revision,
+        expected_context_revision=expected_context_revision,
+        source_hash=document['sha256'] if source_hash is None else source_hash,
+        generation=document['result']['generation'] if generation is None else generation,
+        identifier=identifier, currency=currency, confirmed=True, idempotency_key=key)
+    return OwnerView(w.svc, reader.uploads).confirm_document_context(w.owner, w.company, document['id'], data)
+
+
+def test_metadata_complete_bank_keeps_source_currency_and_questions(w):
+    work = setup_sources(w)
+    banks = [event for event in work.list(w.owner, w.company) if event['kind'] == 'bank']
+    assert banks and all(event['values']['currency'] == 'KRW' and event['context_origin'] == 'source' for event in banks)
+    assert all(event['questions'] and event['questions'][0]['key'] == 'cash_reason' for event in banks)
+    assert all(not event['accounting_complete'] for event in banks)
+    with w.db.connect() as c:
+        assert not w.db.list(c, w.company, 'document_source_context')
+        assert not w.db.list(c, w.company, 'journal')
+
+
+def test_missing_context_stays_unresolved_until_document_confirmation(w):
+    reader = Ingestion(w.svc)
+    saved = facts(w, reader)
+    assert saved['instruments'][0]['currency'] == 'KRW'
+    _reader, document = read_document(w, BARE, 'bare-bank-1')
+    work = Casework(w.svc)
+    work.refresh(w.owner, w.company)
+    event = work.list(w.owner, w.company)[0]
+    assert event['issues'] == ['CURRENCY_UNCONFIRMED', 'OWNERSHIP_UNCONFIRMED']
+    assert not event['values']['currency'] and not event['values']['account']
+    assert event['questions'] == [] and event['state'] == 'REVIEW_CONNECTION_NEEDED'
+    assert event['accounting_complete'] is False
+    home = OwnerView(w.svc, reader.uploads).home(w.owner, w.company)
+    action = next(item for item in home['owner_actions'] if item['kind'] == 'confirm_document_context')
+    assert action['document_id'] == document['id'] and action['candidates'][0]['currency'] is None
+    assert action['candidates'][0]['instrument_currency_applied'] is False
+    assert action['refresh_skipped_evidence'] is False and home['initial_ingestion_waiting_means_refresh_skipped'] is False
+    rows = reader.records(w.owner, w.company, document['id'])['rows']
+    assert rows[0]['values']['currency'] is None and rows[0]['values']['account'] is None
+    with w.db.connect() as c:
+        assert c.execute("SELECT json_extract(body,'$.state') AS state FROM objects WHERE company_id=? AND kind='ingestion_case'", (w.company,)).fetchone()['state'] == 'WAITING_FOR_LINKING'
+        assert c.execute('SELECT content FROM blobs WHERE company_id=? AND sha256=?', (w.company, document['sha256'])).fetchone()['content'] == BARE
+    before_ids = [item['id'] for item in work.list(w.owner, w.company)]
+    confirmed = confirm_context(w, reader, document)
+    assert confirmed['currency_origin'] == 'owner_statement' and confirmed['instrument_currency_applied'] is False
+    assert confirmed['applied_to_original'] is False and confirmed['casework_resume']['state'] == 'ready'
+    resumed = work.list(w.owner, w.company)
+    assert [item['id'] for item in resumed] == before_ids
+    event = resumed[0]
+    assert event['questions'][0]['key'] == 'cash_reason' and event['issues'] == []
+    assert event['values']['currency'] == 'KRW' and event['values']['account'] == '123456789012'
+    assert event['context_origin'] == 'owner_factual_statement' and event['applied_context'][0]['currency_origin'] == 'owner_statement'
+    assert event['accounting_complete'] is False
+    rows = reader.records(w.owner, w.company, document['id'])['rows']
+    assert rows[0]['values']['currency'] is None and rows[0]['values']['account'] is None
+    with w.db.connect() as c:
+        assert not w.db.list(c, w.company, 'journal')
+        assert any(row['action'] == 'document.context_confirmed' for row in c.execute('SELECT action FROM audit WHERE company_id=?', (w.company,)))
+
+
+def test_document_context_rejects_cross_company_viewer_and_stale_bindings(w):
+    reader = Ingestion(w.svc)
+    facts(w, reader)
+    _reader, document = read_document(w, BARE, 'bare-bank-bounds')
+    for actor in (w.viewer, w.preparer, w.reviewer, w.other_owner):
+        with pytest.raises(DomainError) as error:
+            OwnerView(w.svc, reader.uploads).confirm_document_context(actor, w.company, document['id'], DocumentContextInput(
+                expected_revision=document['revision'], source_hash=document['sha256'], generation=document['result']['generation'],
+                identifier='123456789012', currency='KRW', confirmed=True, idempotency_key='doc-context-denied'))
+        assert error.value.code in ('FORBIDDEN', 'NOT_FOUND')
+    with pytest.raises(DomainError) as error:
+        confirm_context(w, reader, document, key='doc-context-stale-rev', expected_revision=document['revision'] + 1)
+    assert error.value.code == 'STALE_VERSION'
+    with pytest.raises(DomainError) as error:
+        confirm_context(w, reader, document, key='doc-context-stale-hash', source_hash='a' * 64)
+    assert error.value.code == 'STALE_SOURCE'
+    with pytest.raises(DomainError) as error:
+        confirm_context(w, reader, document, key='doc-context-stale-gen', generation=document['result']['generation'] + 1)
+    assert error.value.code == 'STALE_GENERATION'
+    with pytest.raises(DomainError) as error:
+        confirm_context(w, reader, document, key='doc-context-masked', identifier='1234****9012')
+    assert error.value.code == 'DOCUMENT_CONTEXT_MASKED'
+    with pytest.raises(DomainError) as error:
+        OwnerView(w.svc, reader.uploads).confirm_document_context(w.owner, w.other_company, document['id'], DocumentContextInput(
+            expected_revision=document['revision'], source_hash=document['sha256'], generation=1,
+            identifier='123456789012', currency='KRW', confirmed=True, idempotency_key='doc-context-other-co'))
+    assert error.value.code == 'NOT_FOUND'
+
+
+def test_masked_or_conflicting_source_identity_cannot_be_bypassed(w):
+    reader = Ingestion(w.svc)
+    facts(w, reader)
+    _reader, masked = read_document(w, MASKED_ACCOUNT, 'masked-account')
+    assert masked['state'] == 'NORMALIZED', masked['state']
+    with pytest.raises(DomainError) as error:
+        confirm_context(w, reader, masked, key='doc-context-masked-source')
+    assert error.value.code == 'DOCUMENT_CONTEXT_CONFLICT' and 'masked_source_account' in error.value.details
+    _reader, other = read_document(w, OTHER_ACCOUNT, 'other-account')
+    assert other['state'] == 'COMPANY_REVIEW'
+    with pytest.raises(DomainError) as error:
+        confirm_context(w, reader, other, key='doc-context-conflict')
+    assert error.value.code == 'READER_NOT_READY'
+    work = Casework(w.svc)
+    work.refresh(w.owner, w.company)
+    events = work.list(w.owner, w.company)
+    assert all(event['ownership'] != 'owner_confirmed' for event in events)
+    assert all(event['values']['currency'] is None for event in events)
+    assert all(event['accounting_complete'] is False for event in events)
+
+
+def test_context_change_and_reprocess_keep_provenance_without_duplicate_events(w):
+    reader = Ingestion(w.svc)
+    facts(w, reader)
+    _reader, document = read_document(w, BARE, 'bare-bank-change')
+    first = confirm_context(w, reader, document)
+    work = Casework(w.svc)
+    event = work.list(w.owner, w.company)[0]
+    answer(work, w, event, 'cash_reason', 'customer_payment', key='bare-answer-0001')
+    changed = confirm_context(w, reader, document, currency='USD', key='doc-context-0002', expected_context_revision=first['revision'])
+    assert changed['reused'] is False and changed['currency'] == 'USD'
+    resumed = work.list(w.owner, w.company)
+    assert len(resumed) == 1 and resumed[0]['id'] == event['id']
+    assert resumed[0]['facts'] == {} and resumed[0]['values']['currency'] == 'USD'
+    assert resumed[0]['questions'][0]['key'] == 'cash_reason'
+    assert resumed[0]['accounting_complete'] is False
+    rows = reader.records(w.owner, w.company, document['id'])['rows']
+    assert rows[0]['values']['currency'] is None
+    with w.db.connect() as c:
+        assert c.execute("SELECT count(*) FROM object_history WHERE company_id=? AND kind='document_source_context'", (w.company,)).fetchone()[0] == 1
+        assert not w.db.list(c, w.company, 'journal')
+        current = sum(item.get('lifecycle') == 'CURRENT' for item in w.db.list(c, w.company, 'economic_event'))
+    assert current == 1
+    fresh = reader.uploads.document(w.owner, w.company, document['id'])
+    Extractions(w.svc).reprocess(w.owner, w.company, document['id'], ReprocessInput(expected_revision=fresh['revision'], idempotency_key='reprocess-context-1', reason='합성 재처리'))
+    assert reader.run_once(w.company)['committed'] is True
+    work.refresh(w.owner, w.company)
+    with w.db.connect() as c:
+        stored = w.db.list(c, w.company, 'document_source_context')[0]
+        assert stored['active'] is False and stored['invalidation_reason'] == 'source_generation'
+        assert any(row['action'] == 'document.context_invalidated' for row in c.execute('SELECT action FROM audit WHERE company_id=?', (w.company,)))
+        assert sum(item.get('lifecycle') == 'CURRENT' for item in w.db.list(c, w.company, 'economic_event')) == 1
+        assert not w.db.list(c, w.company, 'journal')
+    again = work.list(w.owner, w.company)[0]
+    assert again['facts'] == {} and 'CURRENCY_UNCONFIRMED' in again['issues']
+    assert again['accounting_complete'] is False
+
+
+def test_removing_confirmed_instrument_invalidates_document_context(w):
+    reader = Ingestion(w.svc)
+    saved = facts(w, reader)
+    _reader, document = read_document(w, BARE, 'bare-bank-remove')
+    confirm_context(w, reader, document, key='doc-context-remove')
+    work = Casework(w.svc)
+    event = work.list(w.owner, w.company)[0]
+    answer(work, w, event, 'cash_reason', 'customer_payment', key='bare-answer-remove')
+    OwnerView(w.svc, reader.uploads).confirm(w.owner, w.company, CompanyFactsInput(
+        expected_revision=saved['revision'], name='시험 회사 A', business_number='2222222222', mode='company', confirmed=True, instruments=[]))
+    resumed = work.list(w.owner, w.company)[0]
+    assert resumed['facts'] == {} and 'CURRENCY_UNCONFIRMED' in resumed['issues'] and 'OWNERSHIP_UNCONFIRMED' in resumed['issues']
+    with w.db.connect() as c:
+        assert w.db.list(c, w.company, 'document_source_context')[0]['active'] is False
+        assert not w.db.list(c, w.company, 'journal')

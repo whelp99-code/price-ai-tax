@@ -6,7 +6,7 @@ from .auth import Actor
 from .db import DomainError
 from .uploads import Uploads
 from .ingestion import Ingestion
-from .owner import OwnerView, CompanyFactsInput
+from .owner import OwnerView, CompanyFactsInput, DocumentContextInput
 from .extractions import Extractions, ReprocessInput
 from .upload_models import UploadBatchInput, CompleteUploadInput, CancelUploadInput, MAX_CHUNK_BYTES
 
@@ -71,6 +71,9 @@ def register_upload_routes(app, service, actor_dependency):
         view['owner_questions'] = questions
         view['reading_pending'] = any(state in ('QUEUED', 'PROCESSING') for state in states) or any(not item.get('document') for item in view['files'])
         view['reading_attention'] = [{'document_id': item['document']['id'], 'state': item['document']['state'], 'issues': item['document'].get('issues') or []} for item in view['files'] if item.get('document') and item['document']['state'] not in ('NORMALIZED', 'QUEUED', 'PROCESSING')]
+        view['source_context_attention'] = owner.source_context_attention(a, company, document_ids)
+        view['casework_refresh_invoked'] = True
+        view['initial_ingestion_waiting_means_refresh_skipped'] = False
         view['accounting_complete'] = False
         view['manual_transaction_required'] = False
         return view
@@ -82,6 +85,9 @@ def register_upload_routes(app, service, actor_dependency):
     @app.get(prefix + '/documents/{document}')
     def get_document(company: str, document: str, a: Actor = Depends(actor_dependency)):
         return uploads.document(a, company, document)
+    @app.post(prefix + '/documents/{document}/source-context')
+    def confirm_document_context(company: str, document: str, data: DocumentContextInput, a: Actor = Depends(actor_dependency)):
+        return owner.confirm_document_context(a, company, document, data)
 
     @app.get(prefix + '/documents/{document}/extraction')
     def get_extraction(company: str, document: str, offset: int = Query(0, ge=0), limit: int = Query(100, ge=1, le=500), a: Actor = Depends(actor_dependency)):

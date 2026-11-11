@@ -39,6 +39,26 @@ class CompanyFactsInput(UploadInput):
         if len(keys) != len(set(keys)):
             raise ValueError('같은 계좌 또는 카드가 반복되었습니다.')
         return self
+class DocumentContextInput(UploadInput):
+    expected_revision: Annotated[StrictInt, Field(ge=1)]
+    expected_context_revision: Annotated[StrictInt, Field(ge=0)] = 0
+    source_hash: Annotated[StrictStr, Field(pattern=r'^[a-f0-9]{64}$')]
+    generation: Annotated[StrictInt, Field(ge=1)]
+    identifier: Annotated[StrictStr, Field(pattern=r'^[0-9Xx* -]{6,40}$')]
+    currency: Annotated[StrictStr, Field(pattern=r'^[A-Z]{3}$')]
+    confirmed: StrictBool
+    idempotency_key: Annotated[StrictStr, Field(pattern=r'^[A-Za-z0-9_-]{8,120}$')]
+
+    @field_validator('identifier')
+    @classmethod
+    def normalize_identifier(cls, value):
+        return InstrumentInput.normalize_identifier(value)
+
+    @model_validator(mode='after')
+    def must_confirm(self):
+        if not self.confirmed:
+            raise ValueError('이 문서의 계좌와 통화를 확인해야 합니다.')
+        return self
 
 
 class OwnerView:
@@ -110,7 +130,7 @@ class OwnerView:
                 for fact in prior_facts:
                     event = current_events.get(fact.get('event_id'))
                     old = before.get(fact.get('event_id'))
-                    if not event or not old or fact.get('context_hash') != old.get('context_hash') or old.get('source_record_ids') != event.get('source_record_ids') or fact.get('context_hash') == event.get('context_hash'):
+                    if not event or not old or event.get('issues') or fact.get('context_hash') != old.get('context_hash') or old.get('source_record_ids') != event.get('source_record_ids') or fact.get('context_hash') == event.get('context_hash'):
                         continue
                     self.db.create(c, company, 'event_fact', {**payload(fact), 'context_hash': event['context_hash']})
                 c.execute('RELEASE SAVEPOINT casework_resume')
@@ -121,6 +141,136 @@ class OwnerView:
                 return {**result, 'source_context_held_ids': affected, 'casework_resume': resume}
             resume = {'state': 'waiting', 'updated': False, 'message': '나중에 확인된 회사 정보와 원본이 맞지 않아 거래 연결을 보류합니다.'} if affected else {'state': 'ready', 'updated': bool(linked.get('updated'))}
             return {**result, 'source_context_held_ids': affected, 'casework': linked, 'casework_resume': resume}
+    def _document_records(self, c, company, document_id):
+        return [self.db.unpack(row) for row in c.execute("SELECT * FROM objects WHERE company_id=? AND kind='source_record' AND json_extract(body,'$.document_id')=? AND COALESCE(json_extract(body,'$.lifecycle'),'CURRENT')='CURRENT'", (company, document_id))]
+
+    def _confirmed_bank_candidates(self, facts):
+        from .source_identity import confirmed_bank_identifiers
+        return [{'kind': 'bank', 'identifier': ident, 'currency': None, 'instrument_currency_applied': False} for ident in sorted(confirmed_bank_identifiers(facts))]
+
+    def _context_actions(self, c, company, only_ids=None):
+        from .source_identity import context_is_usable, missing_bank_fields, normalize_identifier
+        facts = self.db.list(c, company, 'company_facts')
+        current = facts[0] if facts else None
+        candidates = self._confirmed_bank_candidates(current)
+        contexts = {item['document_id']: item for item in self.db.list(c, company, 'document_source_context')}
+        if only_ids is not None:
+            wanted = sorted(only_ids)
+            if not wanted:
+                return [], {}
+            marks = ','.join('?' for _ in wanted)
+            rows = c.execute(f'SELECT id,filename,state,revision,sha256,result FROM upload_documents WHERE company_id=? AND id IN ({marks})', (company, *wanted)).fetchall()
+        else:
+            rows = c.execute('SELECT id,filename,state,revision,sha256,result FROM upload_documents WHERE company_id=? ORDER BY created_at DESC LIMIT 200', (company,)).fetchall()
+        actions, details = [], {}
+        for row in rows:
+            result = json.loads(row['result']) if row['result'] else {}
+            generation = int(result.get('generation') or 1)
+            records = self._document_records(c, company, row['id']) if row['state'] == 'NORMALIZED' else []
+            missing = missing_bank_fields(records)
+            stored = contexts.get(row['id'])
+            usable = context_is_usable(stored, row['sha256'], generation, records) if records else False
+            owner_context = None
+            if usable:
+                owner_context = {'id': stored['id'], 'revision': stored['revision'], 'identifier': stored['identifier'], 'currency': stored['currency'],
+                                 'basis': 'owner_factual_statement', 'currency_origin': 'owner_statement', 'instrument_currency_applied': False,
+                                 'original_preserved': True, 'confirmed_by': stored.get('confirmed_by'), 'source_hash': stored['source_hash'], 'generation': stored['generation']}
+            action = None
+            if row['state'] == 'NORMALIZED' and missing and not usable:
+                source_accounts = sorted({normalize_identifier((record.get('values') or {}).get('account')) for record in records if record.get('kind') == 'bank_statement' and normalize_identifier((record.get('values') or {}).get('account'))})
+                offered = candidates
+                if len(source_accounts) == 1 and not any(ch in source_accounts[0] for ch in ('*', 'X')):
+                    offered = [item for item in candidates if item['identifier'] == source_accounts[0]]
+                elif source_accounts:
+                    offered = []
+                action = {'kind': 'confirm_document_context', 'label': '이 자료의 원본에 계좌 또는 통화가 없습니다. 확인된 회사 계좌는 후보일 뿐이며, 이 문서의 계좌와 통화를 직접 확인해야 합니다.',
+                          'document_id': row['id'], 'filename': row['filename'], 'expected_revision': row['revision'],
+                          'expected_context_revision': stored['revision'] if stored else 0, 'source_hash': row['sha256'], 'generation': generation,
+                          'missing': missing, 'candidates': offered, 'reader_state': row['state'], 'reader_ready': True,
+                          'refresh_skipped_evidence': False, 'instrument_currency_applied': False}
+            details[row['id']] = {'reader_ready': row['state'] == 'NORMALIZED', 'missing_source_context': action, 'owner_context': owner_context}
+            if action:
+                actions.append(action)
+        return actions, details
+
+    def source_context_attention(self, actor, company, document_ids=None):
+        with self.db.connect() as c:
+            self.auth.guard(c, actor, company)
+            actions, _details = self._context_actions(c, company, set(document_ids) if document_ids is not None else None)
+            return actions
+
+    def _context_response(self, saved):
+        return {'id': saved['id'], 'revision': saved['revision'], 'document_id': saved['document_id'], 'identifier': saved['identifier'],
+                'currency': saved['currency'], 'basis': saved['basis'], 'currency_origin': saved['currency_origin'],
+                'instrument_currency_applied': False, 'applied_to_original': False, 'accounting_complete': False, 'active': bool(saved.get('active', True))}
+
+    def _resume_context(self, c, company, actor_id):
+        from .casework import Casework
+        work = Casework(self.service)
+        c.execute('SAVEPOINT document_context_resume')
+        try:
+            linked = work._refresh(c, company, actor_id)
+            c.execute('RELEASE SAVEPOINT document_context_resume')
+        except DomainError as error:
+            c.execute('ROLLBACK TO SAVEPOINT document_context_resume')
+            c.execute('RELEASE SAVEPOINT document_context_resume')
+            return {'casework_resume': {'state': 'waiting' if error.code == 'CASEWORK_LIMIT' else 'error', 'updated': False, 'code': error.code, 'message': error.message}, 'accounting_complete': False}
+        return {'casework': linked, 'casework_resume': {'state': 'ready', 'updated': bool(linked.get('updated'))}, 'accounting_complete': False}
+
+    def confirm_document_context(self, actor, company, document_id, data: DocumentContextInput):
+        data = DocumentContextInput.model_validate(data)
+        from .source_identity import confirmed_bank_identifiers, context_conflicts, masked_identifier, missing_bank_fields
+        key = 'docctxreq_' + digest({'company': company, 'key': data.idempotency_key})
+        request_hash = digest({'document': document_id, **data.model_dump()})
+        with self.db.transaction() as c:
+            self.auth.guard(c, actor, company, ('owner',))
+            previous = c.execute("SELECT 1 FROM objects WHERE company_id=? AND kind='document_context_request' AND id=?", (company, key)).fetchone()
+            if previous:
+                old = self.db.get(c, company, 'document_context_request', key)
+                if old['request_hash'] != request_hash or old['actor'] != actor.id:
+                    raise DomainError('DOCUMENT_CONTEXT_KEY_CONFLICT', '같은 요청 번호에 다른 문서 확인이 있습니다.')
+                saved = self.db.get(c, company, 'document_source_context', old['confirmation_id'])
+                return {**self._context_response(saved), 'reused': True, **self._resume_context(c, company, actor.id)}
+            document = c.execute('SELECT * FROM upload_documents WHERE company_id=? AND id=?', (company, document_id)).fetchone()
+            if not document:
+                raise DomainError('NOT_FOUND', '현재 회사의 원본 자료가 아닙니다.', 404)
+            if data.expected_revision != document['revision']:
+                raise DomainError('STALE_VERSION', '자료 상태가 바뀌었습니다. 현재 문서를 다시 확인하세요.')
+            if data.source_hash != document['sha256']:
+                raise DomainError('STALE_SOURCE', '원본 해시가 현재 문서와 다릅니다. 이전 확인은 적용하지 않습니다.')
+            result = json.loads(document['result']) if document['result'] else {}
+            generation = int(result.get('generation') or 1)
+            if data.generation != generation:
+                raise DomainError('STALE_GENERATION', '원본 세대가 바뀌었습니다. 이전 확인은 적용하지 않습니다.')
+            if document['state'] != 'NORMALIZED':
+                raise DomainError('READER_NOT_READY', '자료 읽기가 끝나기 전의 상태입니다. 계좌·통화 확인으로 읽기 문제를 넘기지 않습니다.')
+            if masked_identifier(data.identifier):
+                raise DomainError('DOCUMENT_CONTEXT_MASKED', '가려진 계좌 번호로는 문서의 계좌를 확정할 수 없습니다.')
+            facts = self.db.list(c, company, 'company_facts')
+            profile = facts[0] if facts else None
+            if data.identifier not in confirmed_bank_identifiers(profile):
+                raise DomainError('DOCUMENT_CONTEXT_NOT_CANDIDATE', '확인된 회사 계좌 중에서 이 문서의 계좌를 선택해야 합니다. 계좌를 추정하지 않습니다.')
+            records = self._document_records(c, company, document_id)
+            if not missing_bank_fields(records):
+                raise DomainError('DOCUMENT_CONTEXT_NOT_MISSING', '원본에 계좌와 통화가 있습니다. 문서 확인으로 원본 값을 바꾸지 않습니다.')
+            conflicts = context_conflicts(records, data.identifier, data.currency)
+            if conflicts:
+                raise DomainError('DOCUMENT_CONTEXT_CONFLICT', '원본의 계좌·통화 또는 가려진 식별과 충돌하는 확인은 적용하지 않습니다.', details=conflicts)
+            ident = 'docctx_' + digest({'company': company, 'document': document_id})
+            existing = c.execute("SELECT 1 FROM objects WHERE company_id=? AND kind='document_source_context' AND id=?", (company, ident)).fetchone()
+            current = self.db.get(c, company, 'document_source_context', ident) if existing else None
+            if data.expected_context_revision != (current['revision'] if current else 0):
+                raise DomainError('STALE_VERSION', '문서 확인이 바뀌었습니다. 현재 내용을 다시 확인하세요.')
+            body = {'document_id': document_id, 'source_hash': document['sha256'], 'generation': generation, 'document_revision': document['revision'],
+                    'account_kind': 'bank', 'identifier': data.identifier, 'currency': data.currency, 'currency_origin': 'owner_statement',
+                    'instrument_currency_applied': False, 'confirmed_by': actor.id, 'basis': 'owner_factual_statement', 'active': True,
+                    'applied_to_original': False, 'invalidation_reason': None}
+            saved = self.db.replace(c, company, 'document_source_context', ident, body, current['revision']) if current else self.db.create(c, company, 'document_source_context', body, ident=ident)
+            self.db.audit(c, company, actor.id, 'document.context_confirmed', document_id, {
+                'confirmation_id': saved['id'], 'revision': saved['revision'], 'source_hash': document['sha256'], 'generation': generation,
+                'currency_origin': 'owner_statement', 'instrument_currency_applied': False, 'applied_to_original': False, 'basis': 'owner_factual_statement'})
+            self.db.create(c, company, 'document_context_request', {'request_hash': request_hash, 'confirmation_id': saved['id'], 'actor': actor.id}, ident=key)
+            return {**self._context_response(saved), 'reused': False, **self._resume_context(c, company, actor.id)}
 
     def home(self, actor, company):
         with self.db.connect() as c:
@@ -153,13 +303,22 @@ class OwnerView:
             actions = [{'kind': 'confirm_company', 'label': '회사와 계좌 정보를 확인해 주세요.'}] if not facts else []
             if facts and pending_instruments:
                 actions.append({'kind': 'confirm_instruments', 'label': '원본에서 찾은 계좌·카드를 회사 소유인지 확인해 주세요.'})
+            context_actions, context_details = self._context_actions(c, company)
+            actions.extend(context_actions)
+            for d in documents:
+                extra = context_details.get(d['id'], {})
+                d['reader_ready'] = extra.get('reader_ready', d['state'] == 'NORMALIZED')
+                d['missing_source_context'] = extra.get('missing_source_context')
+                d['owner_context'] = extra.get('owner_context')
             return {'company': {'id': company, 'name': profile['name'], 'demo': bool(profile.get('demo')), 'role': role},
                     'counts': {'documents': sum(counts.values()), 'read': counts.get('NORMALIZED', 0),
                                'reading': counts.get('QUEUED', 0) + counts.get('PROCESSING', 0), 'needs_attention': pending,
                                'source_cases': source_cases, 'posted_journals': sum(j.get('state') == 'POSTED' for j in journals),
+                               'context_attention': len(context_actions),
                                'existing_review_cases': sum(x.get('state') not in ('CLOSED', 'SUPERSEDED') for x in legacy_cases)},
                     'needs_company_confirmation': not bool(facts), 'pending_instrument_candidates': pending_instruments, 'documents': documents,
                     'owner_actions': actions,
+                    'initial_ingestion_waiting_means_refresh_skipped': False,
                     'accounting_complete': False, 'live_filing': False,
                     'automation_stage': 'source_reading', 'expert_connected': False,
                     'notice': '자료 읽기는 자동으로 진행합니다. 거래 연결·자동기장·세금 신고의 완료를 뜻하지 않습니다.'}

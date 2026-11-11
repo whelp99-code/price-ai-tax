@@ -13,7 +13,7 @@ from pydantic import Field, StrictInt, StrictStr
 from .db import DomainError, canonical, digest, payload
 from .upload_models import UploadInput
 
-VERSION = 'source-casework/2'
+VERSION = 'source-casework/3'
 MAX_SOURCE_RECORDS = 25000
 
 
@@ -63,12 +63,15 @@ def economic_values(record):
 
 def identity_key(record):
     v=economic_values(record);kind=record['kind'];ref=v['reference']
+    source=record.get('source_values') or record.get('values') or {}
+    account=normalized_id(source.get('account'))
     if kind in ('tax_invoice_list','tax_invoice_xml') and ref and v['supplier_id'] and v['buyer_id']:
         return ['invoice',v['supplier_id'],v['buyer_id'],ref]
     if kind=='card_transactions' and ref and v['card'] and not any(x in v['card'] for x in ('*','X')):
         return ['card',v['card'],(v['date'] or '')[:10],ref,v['status'],v['original_reference']]
-    if kind=='bank_statement' and ref and v['account']:
-        return ['bank',v['account'],ref]
+    # Owner-supplied account context must not retarget an event that the original row could not identify.
+    if kind=='bank_statement' and ref and account:
+        return ['bank',account,ref]
     # No strong external identity: preserve legitimate same-amount repeated rows.
     return ['source',record['source_hash'],record.get('sheet',''),record['row']]
 
@@ -101,10 +104,12 @@ def event_shape(records,profile):
     if v['original_reference'] or any(token in str(v['status'] or '').lower() for token in ('취소','cancel','수정','refund')):issues.append('CORRECTION_REVIEW')
     if any(r['values'].get('amendment_code') for r in records):issues.append('CORRECTION_REVIEW')
     display=first['values'].get('description') or first['values'].get('supplier_name') or first['values'].get('buyer_name') or counterparty or '거래 상대 확인 필요'
+    statements=[r['context_provenance'] for r in records if r.get('context_provenance')]
     return {'kind':kind,'values':v,'direction':direction,'ownership':ownership,'counterparty_id':counterparty,
             'display_counterparty':display,'source_record_ids':[r['id'] for r in records],
             'evidence_ids':sorted({r['evidence_id'] for r in records}), 'document_ids':sorted({r['document_id'] for r in records}),
             'issues':sorted(set(issues)), 'algorithm_version':VERSION, 'accounting_complete':False,
+            'applied_context':statements, 'context_origin':'owner_factual_statement' if statements else 'source',
             'source_signature_verified':False, 'source_statutory_validated':False}
 def question_views(events, document_ids=None):
     if document_ids is not None:
@@ -130,7 +135,10 @@ class Casework:
         rows=c.execute("SELECT o.* FROM objects o JOIN upload_documents d ON d.company_id=o.company_id AND d.id=json_extract(o.body,'$.document_id') WHERE o.company_id=? AND o.kind='source_record' AND COALESCE(json_extract(o.body,'$.lifecycle'),'CURRENT')='CURRENT' AND json_extract(o.body,'$.validation')='NORMALIZED' AND d.state='NORMALIZED' ORDER BY o.id LIMIT ?",(company,MAX_SOURCE_RECORDS+1)).fetchall()
         if len(rows)>MAX_SOURCE_RECORDS:raise DomainError('CASEWORK_LIMIT','자료 규모에 맞는 분할 처리가 필요합니다.')
         records=[self.db.unpack(r) for r in rows if json.loads(r['body']).get('kind') not in ('company_registration','opening_balance')]
-        signature=digest({'algorithm_version':VERSION,'profile':profile,'sources':[(r['id'],r['revision'],r.get('generation',1)) for r in records]})
+        from .source_identity import overlay_owner_context
+        contexts={x['document_id']:x for x in self.db.list(c,company,'document_source_context')}
+        records=[overlay_owner_context(r, contexts.get(r.get('document_id'))) for r in records]
+        signature=digest({'algorithm_version':VERSION,'profile':profile,'sources':[(r['id'],r['revision'],r.get('generation',1)) for r in records],'document_contexts':[(x['id'],x['revision'],bool(x.get('active'))) for x in sorted(contexts.values(), key=lambda item: item['id'])]})
         return records,profile,signature
 
     def _refresh(self,c,company,actor_id):

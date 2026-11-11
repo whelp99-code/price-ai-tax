@@ -88,6 +88,8 @@ class Ingestion:
             c.execute('UPDATE upload_jobs SET state=?,error=?,lease_until=0,updated_at=? WHERE id=? AND lease_token=?', (state, error, now(), job['id'], job['lease_token']))
             self.db.audit(c, job['company_id'], 'system:source-reader', 'ingestion.finished', job['document_id'],
                           {'state': result['state'], 'record_count': len(records), 'case_count': len(case_ids), 'parser': result.get('parser_version')})
+            from .source_identity import retire_document_contexts
+            retire_document_contexts(self.db, c, job['company_id'], document['id'], document['sha256'], generation, 'system:source-reader')
             return {'processed': True, 'id': job['id'], 'state': state, 'error': error, 'records': len(records), 'cases': len(case_ids), 'committed': True}
 
     def run_once(self, company=None, document_id=None):

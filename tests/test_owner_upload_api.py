@@ -322,3 +322,47 @@ def test_fact_save_reports_resume_failure_without_dropping_facts(web, monkeypatc
     assert not client.get(path + '/journals').json()
     screen = client.get('/static/casework.js').text
     assert "post('/events/refresh',{})" in screen and 'resume_error' in screen
+
+def test_document_context_action_is_separate_from_reader_attention(web, w):
+    app, client, path = web
+    saved = client.post(path + '/owner/onboarding', json={'expected_revision': 0, 'name': '시험 회사 A', 'mode': 'company', 'business_number': '222-22-22222', 'confirmed': True, 'instruments': [{'kind': 'bank', 'identifier': '123456789012', 'currency': 'KRW'}]})
+    assert saved.status_code == 200, saved.text
+    raw = ('거래일시,거래내용,입금액,출금액,거래후잔액,거래번호\n2026-09-03 10:00:00,용역대금,1100,0,1100,SYN-HTTP-1\n').encode()
+    batch = start(client, path, raw, key='web-doc-context')
+    assert send(client, path, batch, raw).status_code == 200
+    done = client.post(path + '/uploads/' + batch['id'] + '/complete', json={'expected_revision': batch['revision']})
+    assert done.status_code == 200, done.text
+    body = done.json()
+    document_id = body['files'][0]['document']['id']
+    assert body['reading_attention'] == [] and body['reading_pending'] is False
+    assert body['casework_refresh_invoked'] is True and body['initial_ingestion_waiting_means_refresh_skipped'] is False
+    assert body['source_context_attention'][0]['document_id'] == document_id
+    assert body['source_context_attention'][0]['candidates'][0]['currency'] is None
+    assert body['owner_questions'] == [] and body['accounting_complete'] is False
+    home = client.get(path + '/owner/home').json()
+    assert home['counts']['needs_attention'] == 0 and home['counts']['context_attention'] == 1
+    assert home['initial_ingestion_waiting_means_refresh_skipped'] is False
+    action = next(item for item in home['owner_actions'] if item['kind'] == 'confirm_document_context')
+    screen = client.get('/static/owner.js').text
+    assert 'confirm_document_context' in screen and '/source-context' in screen
+    assert '연결 새로고침을 건너뛰었다는 뜻이 아닙니다' in screen
+    posted = client.post(path + '/documents/' + document_id + '/source-context', json={
+        'expected_revision': action['expected_revision'], 'expected_context_revision': action['expected_context_revision'],
+        'source_hash': action['source_hash'], 'generation': action['generation'], 'identifier': '123456789012',
+        'currency': 'KRW', 'confirmed': True, 'idempotency_key': 'web-doc-context-01'})
+    assert posted.status_code == 200, posted.text
+    assert posted.json()['instrument_currency_applied'] is False and posted.json()['applied_to_original'] is False
+    questions = client.get(path + '/owner/questions').json()['questions']
+    assert questions and questions[0]['key'] == 'cash_reason'
+    extracted = client.get(path + '/documents/' + document_id + '/extraction').json()['rows'][0]['values']
+    assert extracted['account'] is None and extracted['currency'] is None
+    assert not client.get(path + '/journals').json()
+    with TestClient(app) as viewer:
+        login = viewer.post('/api/login', json={'username': 'test-viewer', 'password': PASSWORD})
+        assert login.status_code == 200
+        viewer.headers['x-csrf-token'] = login.json()['csrf']
+        denied = viewer.post(path + '/documents/' + document_id + '/source-context', json={
+            'expected_revision': action['expected_revision'], 'expected_context_revision': posted.json()['revision'],
+            'source_hash': action['source_hash'], 'generation': action['generation'], 'identifier': '123456789012',
+            'currency': 'USD', 'confirmed': True, 'idempotency_key': 'web-doc-context-02'})
+        assert denied.status_code == 403

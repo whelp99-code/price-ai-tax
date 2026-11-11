@@ -37,6 +37,8 @@ function chooseView(view) {
 }
 function descriptionFor(doc) {
   if (doc.state === 'NO_ACTIVITY_REPORTED') return '원본에 거래 없음과 조회기간이 표시되어 있습니다. 전체 자료 확인·마감 완료로 확정된 것은 아닙니다.';
+  if (doc.missing_source_context) return '자료 읽기는 끝났습니다. 원본에 계좌 또는 통화가 없어 이 문서의 확인이 필요합니다. 읽기 실패나 연결 새로고침 누락이 아닙니다.';
+  if (doc.owner_context) return (kindNames[doc.document_kind] || '원본 자료') + ' · 대표가 확인한 계좌·통화 사실을 이 문서에만 적용했습니다. 원본 파일은 바꾸지 않았습니다.';
   if (doc.state === 'NORMALIZED') return (kindNames[doc.document_kind] || '원본 자료') + ' · ' + doc.record_count + '개 기록을 읽었습니다. 회계 처리는 아직 완료되지 않았습니다.';
   const issue = (doc.issues || [])[0];
   const code = issue?.code || doc.inspection?.code;
@@ -57,6 +59,10 @@ function renderDocuments(home, batches) {
     const attention = !['NORMALIZED','QUEUED','PROCESSING'].includes(doc.state);
     actions.append(element('span', statusNames[doc.state] || '확인 필요', 'pill' + (attention ? ' attention' : '')));
     if (doc.record_count) actions.append(button('읽은 내용', () => showExtraction(doc.id, doc.filename)));
+    if (doc.missing_source_context) {
+      actions.append(element('span', '원본 맥락 없음', 'pill attention'));
+      if (home.company.role === 'owner') actions.append(button('계좌·통화 확인', () => confirmDocumentContext(doc.missing_source_context), 'primary'));
+    }
     if (['READ_FAILED','FORMAT_REVIEW','VALIDATION_REQUIRED','COMPANY_REVIEW','PERMISSION_REVIEW'].includes(doc.state) && home.company.role !== 'viewer') {
       actions.append(button('다시 읽기', async () => {
         await post('/documents/' + encodeURIComponent(doc.id) + '/reprocess', {expected_revision:doc.revision,idempotency_key:crypto.randomUUID(),reason:'대표 자료함에서 원본 재확인 요청'});
@@ -82,6 +88,12 @@ function renderHome(home, batches) {
     card.append(element('p', home.needs_company_confirmation ? '이 자료함의 회사와 회사 소유 계좌 정보를 확인해 주세요.' : '원본에서 계좌·카드 후보를 찾았습니다. 우리 회사 자료인 것만 선택해 주세요.'), button('회사 계좌·카드 확인', showOnboarding, 'primary'));
     questions.append(card);
   } else questions.append(element('p','현재 대표님께 추가로 요청한 회사 사실이 없습니다.'));
+  for (const action of (home.owner_actions || []).filter(item => item.kind === 'confirm_document_context')) {
+    const card = element('div', undefined, 'note');
+    card.append(element('p', action.label), element('p', '회사 계좌의 통화가 원본 행의 통화를 대신 채우지 않습니다. 이 문서에 대해 통화를 직접 입력해야 합니다.', 'small'));
+    if (home.company.role === 'owner') card.append(button('이 문서의 계좌·통화 확인', () => confirmDocumentContext(action), 'primary'));
+    questions.append(card);
+  }
   if (home.counts.needs_attention) questions.append(element('p', '자료 ' + home.counts.needs_attention + '개가 추가 확인 또는 읽기 지원을 기다립니다. 대표님께 회계 판단을 요청한 것은 아닙니다.', 'note'));
   questions.append(element('p','거래 목적은 쉬운 업무 사실로 확인합니다. 자동기장 정책·전문 검토가 아직 연결되지 않은 업무는 완료로 표시하지 않습니다.','small'));
   const stats = $('#result-stats'); stats.replaceChildren();
@@ -89,6 +101,7 @@ function renderHome(home, batches) {
   $('#result-notice').textContent = home.notice;
   const pending = $('#pending-summary'); pending.replaceChildren();
   pending.append(element('p', '읽은 자료에서 ' + home.counts.source_cases + '개의 거래 확인 작업이 만들어졌습니다. 아직 다른 자료 연결과 회계 검증을 거치기 전입니다.','note'));
+  pending.append(element('p', '읽기 직후 연결 대기 표시는 연결 새로고침을 건너뛰었다는 뜻이 아닙니다.', 'small'));
   pending.append(element('p', '기존 검증 장부의 확정 기록: ' + home.counts.posted_journals + '건. 이번 업로드의 자동기장 완료 건수와는 다릅니다.'));
   pending.append(element('p','실제 기관별 원본 양식의 검증과 최종 세목·신고 기능은 아직 인수 전입니다.','small'));
   if(typeof renderBusinessFacts==='function')renderBusinessFacts();
@@ -122,6 +135,61 @@ async function showExtraction(id, filename) {
 
     if (result.next_offset !== null) root.append(element('p','앞의 100개 기록을 표시했습니다. 전체 ' + result.total + '개 기록은 원본 위치와 함께 보관되어 있습니다.','small'));
   } catch (error) { $('#owner-dialog-error').textContent = error.message; }
+}
+async function confirmDocumentContext(action) {
+  const root = openDialog((action.filename || '자료') + ' · 계좌·통화 확인');
+  root.append(element('p', '원본 파일과 읽은 칸은 바꾸지 않습니다. 회사 계좌는 이 문서의 후보일 뿐이며, 계좌에 저장된 통화가 원본 행의 통화를 채우지 않습니다.'));
+  if (!action.candidates || !action.candidates.length) {
+    root.append(element('p', '먼저 가려지지 않은 회사 소유 계좌를 확인해 주세요. 계좌나 통화를 추정해 넣지 않습니다.'), button('회사 계좌 확인', showOnboarding, 'primary'));
+    return;
+  }
+  const form = document.createElement('form');
+  const accountLabel = element('label', '이 문서의 계좌');
+  const select = document.createElement('select');
+  select.required = true;
+  select.append(new Option('계좌를 선택하세요', ''));
+  for (const candidate of action.candidates) select.append(new Option('계좌 ' + candidate.identifier, candidate.identifier));
+  accountLabel.append(select);
+  const currencyLabel = element('label', '이 문서의 통화');
+  const currency = document.createElement('input');
+  currency.required = true;
+  currency.maxLength = 3;
+  currency.placeholder = '예: KRW';
+  currency.autocomplete = 'off';
+  currencyLabel.append(currency);
+  const confirmation = element('label', undefined, 'check');
+  const agree = document.createElement('input');
+  agree.type = 'checkbox';
+  agree.required = true;
+  confirmation.append(agree, document.createTextNode('이 문서의 계좌와 통화가 사실임을 확인했습니다. 회계 처리 승인이 아닙니다.'));
+  const submit = element('button', '이 문서만 확인', 'primary');
+  submit.type = 'submit';
+  form.append(accountLabel, currencyLabel, confirmation, submit);
+  form.addEventListener('submit', async event => {
+    event.preventDefault();
+    submit.disabled = true;
+    try {
+      const saved = await post('/documents/' + encodeURIComponent(action.document_id) + '/source-context', {
+        expected_revision: action.expected_revision,
+        expected_context_revision: action.expected_context_revision,
+        source_hash: action.source_hash,
+        generation: action.generation,
+        identifier: select.value,
+        currency: currency.value.trim().toUpperCase(),
+        confirmed: agree.checked,
+        idempotency_key: 'ctx' + crypto.randomUUID().replace(/-/g, ''),
+      });
+      $('#owner-dialog').close();
+      await refresh();
+      if (saved.casework_resume && saved.casework_resume.state !== 'ready') showError(new Error(saved.casework_resume.message || '확인한 사실을 거래 연결에 반영하지 못했습니다.'));
+      else toast('이 문서의 계좌·통화를 확인했습니다. 원본은 그대로입니다.');
+    } catch (error) {
+      $('#owner-dialog-error').textContent = error.message;
+    } finally {
+      submit.disabled = false;
+    }
+  });
+  root.append(form);
 }
 async function showOnboarding() {
   const current = await request(prefix('/owner/onboarding'));
