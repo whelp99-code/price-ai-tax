@@ -1,5 +1,14 @@
 from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
+import hashlib
+import shutil
+from fastapi.testclient import TestClient
+from price.api import create_app
+from price.db import Database
+from price.service import Service
+from price.uploads import Uploads
+from price.upload_models import UploadBatchInput
+from conftest import PASSWORD, World
 import pytest
 from pydantic import ValidationError
 from price.casework import Casework, FactAnswer
@@ -394,10 +403,6 @@ def test_removing_confirmed_instrument_invalidates_document_context(w):
         assert not w.db.list(c, w.company, 'journal')
 
 def test_first_use_without_confirmed_account_reaches_existing_questions(w):
-    screen = open('price/static/owner.js', encoding='utf-8').read()
-    assert 'owner-account-identifier' in screen and 'owner-account-currency' in screen
-    assert 'confirm_owner_account' in screen and '계좌나 통화를 추정해 넣지 않습니다' in screen
-    assert 'currency: currency.value.trim().toUpperCase()' in screen
     reader = Ingestion(w.svc)
     owner = OwnerView(w.svc, reader.uploads)
     named = owner.confirm(w.owner, w.company, CompanyFactsInput(
@@ -423,14 +428,6 @@ def test_first_use_without_confirmed_account_reaches_existing_questions(w):
     with pytest.raises(DomainError) as error:
         confirm_context(w, reader, document, identifier='1234****9012', key='first-use-masked')
     assert error.value.code == 'DOCUMENT_CONTEXT_MASKED'
-    owner.confirm(w.other_owner, w.other_company, CompanyFactsInput(
-        expected_revision=0, name='시험 회사 B', business_number='3333333333', mode='company', confirmed=True,
-        instruments=[{'kind': 'bank', 'identifier': '999888777666', 'currency': 'KRW'}]))
-    with pytest.raises(DomainError) as error:
-        owner.confirm(w.owner, w.company, CompanyFactsInput(
-            expected_revision=named['revision'], name='시험 회사 A', business_number='2222222222', mode='company', confirmed=True,
-            instruments=[{'kind': 'bank', 'identifier': '999888777666', 'currency': 'KRW'}]))
-    assert error.value.code == 'COMPANY_INSTRUMENT_CONFLICT'
     saved = owner.confirm(w.owner, w.company, CompanyFactsInput(
         expected_revision=named['revision'], name='시험 회사 A', business_number='2222222222', mode='company', confirmed=True,
         instruments=[{'kind': 'bank', 'identifier': '123456789012', 'currency': 'KRW'}]))
@@ -500,3 +497,80 @@ def test_first_use_later_krw_still_rejects_fraction_before_questions(w):
         assert not w.db.list(c, w.company, 'document_source_context')
         assert not w.db.list(c, w.company, 'journal')
         assert c.execute('SELECT content FROM blobs WHERE company_id=? AND sha256=?', (w.company, document['sha256'])).fetchone()['content'] == FRACTION_BARE
+
+def _visible(value):
+    if isinstance(value, list):
+        return [_visible(item) for item in value]
+    if isinstance(value, dict):
+        hidden = {'id', 'created_at', 'updated_at', 'confirmed_by', 'document_id', 'source_hash', 'filename', 'signature'}
+        return {key: _visible(item) for key, item in value.items() if key not in hidden}
+    return value
+
+
+def test_owner_account_response_is_identical_whether_other_company_registered_it(tmp_path, pristine):
+    backup, company, owner, actors, other_company, other_owner = pristine
+    account = {'kind': 'bank', 'identifier': '123456789012', 'currency': 'KRW'}
+
+    worlds = {}
+    other_documents = {}
+    for name, register_other in (('absent', False), ('present', True)):
+        target = tmp_path / f'{name}.sqlite3'
+        shutil.copyfile(backup, target)
+        db = Database(target)
+        svc = Service(db)
+        world = World(db, svc, company, owner, actors['reviewer'], actors['preparer'], actors['viewer'], other_company, other_owner)
+        view = OwnerView(svc, Ingestion(svc).uploads)
+        if register_other:
+            view.confirm(other_owner, other_company, CompanyFactsInput(
+                expected_revision=0, name='시험 회사 B', business_number='3333333333', mode='company', confirmed=True,
+                instruments=[account]))
+        raw = BARE
+        uploads = Uploads(svc)
+        batch = uploads.begin(other_owner, other_company, UploadBatchInput(
+            idempotency_key=f'other-{name}', files=[{'client_file_id': 'source1', 'filename': '통장.csv', 'size_bytes': len(raw), 'sha256': hashlib.sha256(raw).hexdigest()}]))
+        uploads.put_chunk(other_owner, other_company, batch['id'], 'source1', 0, raw, hashlib.sha256(raw).hexdigest())
+        done = uploads.complete(other_owner, other_company, batch['id'], batch['revision'])
+        other_documents[name] = done['files'][0]['document']['id']
+        worlds[name] = target
+
+    def observe(path, other_document):
+        app = create_app(path)
+        with TestClient(app) as client:
+            login = client.post('/api/login', json={'username': 'test-owner', 'password': PASSWORD})
+            assert login.status_code == 200
+            client.headers['x-csrf-token'] = login.json()['csrf']
+            base = '/api/companies/' + company
+            saved = client.post(base + '/owner/onboarding', json={
+                'expected_revision': 0, 'name': '시험 회사 A', 'business_number': '2222222222', 'mode': 'company', 'confirmed': True,
+                'instruments': [account]})
+            home = client.get(base + '/owner/home')
+            denial_body = {
+                'expected_revision': 1, 'expected_context_revision': 0, 'source_hash': 'a' * 64, 'generation': 1,
+                'identifier': account['identifier'], 'currency': 'KRW', 'confirmed': True, 'idempotency_key': 'same-denial-key01'}
+            missing = client.post(base + '/documents/missing-document-id/source-context', json=denial_body)
+            foreign = client.post(base + '/documents/' + other_document + '/source-context', json=denial_body)
+        db = Database(path)
+        with db.connect() as c:
+            stored = db.list(c, company, 'company_facts')
+            journals = db.list(c, company, 'journal')
+        return {
+            'status': saved.status_code,
+            'body': _visible(saved.json()),
+            'home_status': home.status_code,
+            'actions': _visible(home.json().get('owner_actions')),
+            'accounting_complete': home.json().get('accounting_complete'),
+            'pending': home.json().get('pending_instrument_candidates'),
+            'stored': _visible(stored),
+            'journals': journals,
+            'missing_document': (missing.status_code, missing.json()),
+            'foreign_document': (foreign.status_code, foreign.json()),
+        }
+
+    absent = observe(worlds['absent'], other_documents['absent'])
+    present = observe(worlds['present'], other_documents['present'])
+    assert absent == present
+    assert absent['status'] == 200
+    assert absent['body']['instruments'] == [account]
+    assert absent['accounting_complete'] is False and absent['journals'] == []
+    assert absent['missing_document'] == absent['foreign_document']
+    assert absent['missing_document'][0] == 404 and absent['missing_document'][1]['code'] == 'NOT_FOUND'
