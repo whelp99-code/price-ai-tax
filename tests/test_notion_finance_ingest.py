@@ -7,8 +7,8 @@ from pathlib import Path
 import pytest
 
 from price.auth import Actor
-from price.db import Database
-from price.models import CompanyInput
+from price.db import Database, DomainError, canonical, now, uid
+from price.models import CompanyInput, UserInput
 from price.notion_finance_ingest import apply_drafts, edited_index
 from price.notion_finance_map import map_snapshot
 from price.service import Service
@@ -61,6 +61,119 @@ def test_insert_is_idempotent_and_draft_only(scratch):
         kinds = [r[0] for r in c.execute("SELECT DISTINCT kind FROM objects")]
     assert body["notion_provenance"] == {"page_id": "page-a", "last_edited_time": "2026-09-30T00:00:00.000Z"}
     assert "journal" not in kinds
+
+
+def test_unchanged_reingestion_performs_no_write(scratch):
+    db, svc, company, actor = scratch
+    row = _row("page-replay")
+    assert _apply(db, actor, company, [row])["inserted"] == 1
+    with db.transaction() as c:
+        c.execute("CREATE TABLE write_probe(n INTEGER)")
+        for table in ("objects", "external_ids", "object_history", "audit"):
+            c.execute(
+                f"CREATE TRIGGER probe_{table}_ins AFTER INSERT ON {table} "
+                "BEGIN INSERT INTO write_probe VALUES(1); END"
+            )
+            c.execute(
+                f"CREATE TRIGGER probe_{table}_upd AFTER UPDATE ON {table} "
+                "BEGIN INSERT INTO write_probe VALUES(1); END"
+            )
+    second = _apply(db, actor, company, [row])
+    with db.connect() as c:
+        writes = c.execute("SELECT count(*) FROM write_probe").fetchone()[0]
+    assert second["inserted"] == 0 and second["updated"] == 0 and second["unchanged"] == 1
+    assert second["provenance"] == 0 and second["quarantined"] == 0 and second["journals"] == 0
+    assert writes == 0
+
+
+def test_viewer_cannot_mutate_existing_draft(scratch):
+    db, svc, company, actor = scratch
+    _apply(db, actor, company, [_row("page-viewer")])
+    viewer = svc.add_user(
+        actor,
+        company,
+        UserInput(username="scratch-viewer", password="Test-Only-Price-2026!", role="viewer"),
+    )
+    viewer_actor = Actor(viewer["id"], viewer["username"])
+
+    def persisted_rows():
+        with db.connect() as c:
+            return tuple(
+                tuple(c.execute(f"SELECT * FROM {table} ORDER BY 1,2,3").fetchall())
+                for table in ("objects", "external_ids", "object_history", "audit")
+            )
+
+    before = persisted_rows()
+    report = map_snapshot([_row("page-viewer", gross=2200)], {})
+    with pytest.raises(DomainError) as error:
+        apply_drafts(db, viewer_actor, company, report, {"page-viewer": "2026-10-01T00:00:00Z"})
+    assert getattr(error.value, "code", None) == "FORBIDDEN"
+    assert persisted_rows() == before
+
+
+def test_viewer_cannot_apply_empty_ingest_report(scratch):
+    db, svc, company, actor = scratch
+    viewer = svc.add_user(
+        actor,
+        company,
+        UserInput(username="empty-viewer", password="Test-Only-Price-2026!", role="viewer"),
+    )
+    viewer_actor = Actor(viewer["id"], viewer["username"])
+    report = map_snapshot([], {})
+    with db.connect() as c:
+        before = {
+            table: tuple(c.execute(f"SELECT * FROM {table} ORDER BY 1,2,3").fetchall())
+            for table in ("objects", "external_ids", "object_history", "audit")
+        }
+    with pytest.raises(DomainError) as error:
+        apply_drafts(db, viewer_actor, company, report, edited_index([]))
+    assert error.value.code == "FORBIDDEN"
+    with db.connect() as c:
+        after = {
+            table: tuple(c.execute(f"SELECT * FROM {table} ORDER BY 1,2,3").fetchall())
+            for table in ("objects", "external_ids", "object_history", "audit")
+        }
+    assert after == before
+
+
+def test_foreign_company_actor_cannot_mutate_existing_draft(scratch):
+    db, svc, company, actor = scratch
+    _apply(db, actor, company, [_row("page-foreign")])
+    other_company = uid("company")
+    with db.transaction() as c:
+        c.execute(
+            "INSERT INTO companies VALUES(?,?,?)",
+            (
+                other_company,
+                canonical({"name": "synthetic foreign", "demo": False, "ledger_mode": "validation"}),
+                now(),
+            ),
+        )
+        foreign = svc.auth.add_user(
+            c,
+            other_company,
+            UserInput(username="foreign-owner", password="Test-Only-Price-2026!", role="owner"),
+        )
+
+    def persisted_rows():
+        with db.connect() as c:
+            return tuple(
+                tuple(c.execute(f"SELECT * FROM {table} ORDER BY 1,2,3").fetchall())
+                for table in ("objects", "external_ids", "object_history", "audit")
+            )
+
+    before = persisted_rows()
+    report = map_snapshot([_row("page-foreign", gross=2200)], {})
+    with pytest.raises(DomainError) as error:
+        apply_drafts(
+            db,
+            Actor(foreign["id"], foreign["username"]),
+            company,
+            report,
+            {"page-foreign": "2026-10-01T00:00:00Z"},
+        )
+    assert error.value.code == "NOT_FOUND"
+    assert persisted_rows() == before
 
 
 def test_bank_amount_change_updates_draft(scratch):
@@ -134,3 +247,97 @@ def test_disappeared_page_is_reported_not_deleted(scratch):
     with db.connect() as c:
         n = c.execute("SELECT count(*) FROM objects WHERE kind='transaction'").fetchone()[0]
     assert n == 1
+
+
+@pytest.mark.parametrize("explicit", [False, True])
+@pytest.mark.parametrize("existing_db", [False, True])
+@pytest.mark.parametrize("bad_title", ["작성일 없음", "거래 | 2026-02-31"])
+def test_missing_later_issue_date_rejects_before_any_write(tmp_path: Path, explicit, existing_db, bad_title):
+    import contextlib
+    import importlib.util
+    import io
+    import sys
+
+    spec = importlib.util.spec_from_file_location(
+        "notion_finance_ingest_date_gate",
+        Path(__file__).resolve().parents[1] / "scripts" / "notion_finance_ingest.py",
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    db_path = tmp_path / "scratch.sqlite3"
+    if existing_db:
+        opened = Database(db_path)
+        Service(opened).auth.bootstrap(CompanyInput(name="scratch-date"), "scratch-date", "scratch-secret-date")
+    before = db_path.read_bytes() if existing_db else None
+    dated = _row("page-dated", approval="202609011234567890123456")
+    missing = _row("00000000-0000-4000-8000-000000000001", approval="202609021234567890123457")
+    missing["properties"]["거래명"] = bad_title
+    other = _row("00000000-0000-4000-8000-000000000002", approval="202609031234567890123458")
+    other["properties"]["거래명"] = "날짜 없음"
+    snapshot = tmp_path / "snap.json"
+    snapshot.write_text(json.dumps({"finance": [dated, missing, other]}), encoding="utf-8")
+    export = tmp_path / "exports"
+    export.mkdir()
+    (export / "hometax_purchase_etax_20260901_20261020.csv").write_text("승인번호,합계금액,공급가액,세액\n", encoding="utf-8")
+    argv = sys.argv
+    sys.argv = [
+        "notion_finance_ingest",
+        "--snapshot", str(snapshot),
+        "--db", str(db_path),
+        "--hometax-dir", str(export),
+        "--backup-dir", str(tmp_path / "backups"),
+        "--report", str(tmp_path / "report.json"),
+    ]
+    if explicit:
+        sys.argv += ["--period-start", "2026-09-01", "--period-end", "2026-10-20"]
+    try:
+        with pytest.raises(SystemExit, match="purchase issue date missing") as caught:
+            with contextlib.redirect_stdout(io.StringIO()):
+                module.main()
+        message = str(caught.value)
+        assert "count=2" in message
+        assert "00000000-0000-4000-8000-000000000001 https://app.notion.com/p/00000000000040008000000000000001" in message
+        assert "00000000-0000-4000-8000-000000000002 https://app.notion.com/p/00000000000040008000000000000002" in message
+        assert "page-dated" not in message
+        assert bad_title not in message
+        assert "날짜 없음" not in message
+        assert "1100" not in message
+    finally:
+        sys.argv = argv
+    if existing_db:
+        assert db_path.read_bytes() == before
+    else:
+        assert not db_path.exists()
+    assert not (tmp_path / "backups").exists()
+    assert not (tmp_path / "report.json").exists()
+
+
+@pytest.mark.parametrize("source_period", ["missing", "conflicting"])
+def test_no_flag_ingest_rejects_unresolved_period_before_database(tmp_path, monkeypatch, source_period):
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "notion_ingest_unresolved_period",
+        Path(__file__).resolve().parents[1] / "scripts" / "notion_finance_ingest.py",
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    snapshot = tmp_path / "snap.json"
+    snapshot.write_text(json.dumps({"finance": [_row("valid")]}), encoding="utf-8")
+    exports = tmp_path / "exports"
+    exports.mkdir()
+    names = ["BuyHomeTax.csv"] if source_period == "missing" else [
+        "hometax_purchase_etax_20260901_20261020.csv",
+        "hometax_purchase_etax_20260801_20260831.csv",
+    ]
+    for name in names:
+        (exports / name).write_text("승인번호,합계금액,공급가액,세액\n", encoding="utf-8")
+    db_path = tmp_path / "absent.sqlite3"
+    monkeypatch.setattr("sys.argv", [
+        "ingest", "--snapshot", str(snapshot), "--db", str(db_path),
+        "--hometax-dir", str(exports), "--backup-dir", str(tmp_path / "backups"),
+    ])
+    with pytest.raises(SystemExit, match="purchase period missing"):
+        module.main()
+    assert not db_path.exists()
+    assert not (tmp_path / "backups").exists()

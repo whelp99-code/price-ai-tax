@@ -6,13 +6,19 @@ figures disagree with an external approval, is HOLD.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from collections.abc import Mapping
+from dataclasses import dataclass, field, replace
 from datetime import date
-from typing import Any, Mapping
+from typing import Literal
+
+from pydantic import JsonValue
 
 from .models import TransactionInput
 
-CLASSIFICATION = {
+CLASSIFICATION: dict[
+    str,
+    tuple[Literal["invoice", "bank"], Literal["sale", "purchase", "receipt", "payment"]],
+] = {
     "매출": ("invoice", "sale"),
     "매입": ("invoice", "purchase"),
     "기타입금": ("bank", "receipt"),
@@ -20,8 +26,18 @@ CLASSIFICATION = {
 }
 
 _DATE = re.compile(r"(20\d{2}-\d{2}-\d{2})")
-_APPROVAL_MEMO = re.compile(r"홈택스 승인번호:\s*([0-9]{8,24})")
-_INVOICE_KEY = re.compile(r"^invoice\|([0-9]{8,24})$")
+_TITLE_ISSUE_DATE = re.compile(r"\|\s*(20\d{2}-\d{2}-\d{2})\s*$")
+_APPROVAL_EXACT = re.compile(r"^[0-9]{24}$")
+_INVOICE_KEY = re.compile(r"^invoice\|([0-9]{24})$")
+
+def _rounded_ten_percent(net: int) -> int:
+    """Half-up 10 percent of net, in won."""
+    sign = -1 if net < 0 else 1
+    return sign * ((abs(net) + 5) // 10)
+
+
+def _invoice_tax_within_one_won(net: int, tax: int) -> bool:
+    return abs(tax - _rounded_ten_percent(net)) <= 1
 
 SOURCE = "notion"
 
@@ -35,8 +51,11 @@ class Hold:
     tax: int | None = None
     gross: int | None = None
     approval_tail: str = ""
+    issue_date: date | None = None
+    approval: str | None = None
     counterparty: str = ""
     external_gross: int | None = None
+    supplier_biz: str = ""
 
     @property
     def held(self) -> bool:
@@ -55,6 +74,8 @@ class Mapped:
     approval: str | None
     keys: dict[str, str]
     draft: TransactionInput
+    issue_date: date | None = None
+    supplier_biz: str = ""
 
     @property
     def held(self) -> bool:
@@ -67,6 +88,10 @@ class MapReport:
     by_class: dict[str, int] = field(default_factory=dict)
     loaded: list[Mapped] = field(default_factory=list)
     holds: list[Hold] = field(default_factory=list)
+    hometax_separate: list[dict[str, str]] = field(default_factory=list)
+    @property
+    def hold_count(self) -> int:
+        return len(self.holds)
 
     def purchase_notion_gross(self) -> int:
         total = 0
@@ -79,7 +104,7 @@ class MapReport:
         return sum(item.gross for item in self.loaded if item.direction == "purchase")
 
 
-def _money(value: Any, label: str) -> int | Hold:
+def _money(value: JsonValue, label: str) -> int | Hold:
     if isinstance(value, bool) or not isinstance(value, int):
         return Hold("", "", f"{label} is not an integer; not fixed")
     if value < 0:
@@ -95,24 +120,65 @@ def _date_from(*texts: str | None) -> date | None:
         if match:
             return date.fromisoformat(match.group(1))
     return None
+def supplier_biz_digits(props: Mapping[str, JsonValue]) -> str:
+    """10-digit supplier number only. A shorter or longer run is not a key."""
+    raw = props.get("공급자사업자등록번호") or props.get("사업자번호") or ""
+    if not raw:
+        memo = str(props.get("메모") or "")
+        labeled = re.search(
+            r"(?:공급자사업자등록번호|사업자번호)\s*[:：]\s*([0-9][0-9\- ]{8,16})",
+            memo,
+        )
+        raw = labeled.group(1) if labeled else ""
+    digits = re.sub(r"\D", "", str(raw))
+    return digits if len(digits) == 10 else ""
+def purchase_issue_date(title: str) -> date | None:
+    """Original issue date at the end of 거래명. Not 실제 처리일 or createdAt."""
+    match = _TITLE_ISSUE_DATE.search(title or "")
+    if not match:
+        return None
+    try:
+        return date.fromisoformat(match.group(1))
+    except ValueError:
+        return None
 
 
-def _approval(natural_key: str, memo: str) -> tuple[str | None, str | None]:
-    """Return (approval, conflict_reason). Never picks a winner."""
+def _labeled_approval_token(memo: str) -> tuple[str | None, bool, str]:
+    """Return the token immediately after an explicit Hometax approval label.
+
+    A later bare 24-digit run is never a substitute for a bad labeled token.
+    The third value is the raw token tail, kept even when the token is not loadable.
+    """
+    labeled = re.search(r"홈택스\s*승인번호\s*[:：]", memo or "")
+    if not labeled:
+        return None, False, ""
+    rest = (memo or "")[labeled.end():]
+    token_match = re.match(r"\s*([0-9A-Za-z-]+)", rest)
+    if not token_match:
+        return None, True, ""
+    token = token_match.group(1)
+    if _APPROVAL_EXACT.fullmatch(token):
+        return token, True, token[-4:]
+    return None, True, token[-4:]
+
+
+def _approval(natural_key: str, memo: str) -> tuple[str | None, str | None, str]:
+    """Return (approval, conflict_reason, tail). Never picks a winner."""
     from_key = None
     match = _INVOICE_KEY.match(natural_key.strip())
     if match:
         from_key = match.group(1)
-    from_memo = None
-    memo_match = _APPROVAL_MEMO.search(memo or "")
-    if memo_match:
-        from_memo = memo_match.group(1)
+    elif natural_key.strip().lower().startswith("invoice|"):
+        return None, "approval is not exactly 24 digits; not loaded", ""
+    from_memo, labeled, labeled_tail = _labeled_approval_token(memo or "")
+    if labeled and from_memo is None:
+        return None, "approval is not a complete 24-digit number; not loaded", labeled_tail
     if from_key and from_memo and from_key != from_memo:
-        return None, "approval in natural key and memo disagree; not fixed"
-    return from_key or from_memo, None
+        return None, "approval in natural key and memo disagree; not fixed", ""
+    return from_key or from_memo, None, (from_key or from_memo or "")[-4:]
 
 
-def _counterparty(props: Mapping[str, Any]) -> str:
+def _counterparty(props: Mapping[str, JsonValue]) -> str:
     named = props.get("거래처")
     if isinstance(named, str) and named.strip():
         return named.strip()[:160]
@@ -121,11 +187,14 @@ def _counterparty(props: Mapping[str, Any]) -> str:
     return (head or title or "unknown")[:160]
 
 
-def map_row(row: Mapping[str, Any]) -> Mapped | Hold:
+def map_row(row: Mapping[str, JsonValue]) -> Mapped | Hold:
     """Map one snapshot finance object. Does not read a database."""
     page_id = str(row.get("sourceId") or "").strip()
-    props = row.get("properties") if isinstance(row.get("properties"), Mapping) else row
+    properties = row.get("properties")
+    props = properties if isinstance(properties, Mapping) else row
     classification = str(props.get("구분") or "").strip()
+    approval, approval_conflict, approval_tail = _approval(str(props.get("자연키") or ""), str(props.get("메모") or ""))
+    issue_date = purchase_issue_date(str(props.get("거래명") or "")) if classification == "매입" else None
     if not page_id:
         return Hold("", classification, "missing notion page id; not fixed")
     pair = CLASSIFICATION.get(classification)
@@ -135,11 +204,11 @@ def map_row(row: Mapping[str, Any]) -> Mapped | Hold:
     raw_tax = props.get("부가세")
     if kind == "bank" and raw_tax in (None, ""):
         raw_tax = 0
-    amounts = []
+    amounts: list[int] = []
     for label, value in (("net", props.get("금액")), ("tax", raw_tax), ("gross", props.get("합계"))):
         parsed = _money(value, label)
         if isinstance(parsed, Hold):
-            return Hold(page_id, classification, parsed.reason)
+            return Hold(page_id, classification, parsed.reason, issue_date=issue_date, approval_tail=approval_tail, approval=approval)
         amounts.append(parsed)
     net, tax, gross = amounts
     if net + tax != gross:
@@ -150,12 +219,24 @@ def map_row(row: Mapping[str, Any]) -> Mapped | Hold:
             net,
             tax,
             gross,
+            issue_date=issue_date,
+            approval_tail=approval_tail,
+            approval=approval,
         )
     if kind == "bank" and tax:
-        return Hold(page_id, classification, "tax on bank-only row; not fixed", net, tax, gross)
-    approval, approval_conflict = _approval(str(props.get("자연키") or ""), str(props.get("메모") or ""))
+        return Hold(page_id, classification, "tax on bank-only row; not fixed", net, tax, gross, issue_date=issue_date, approval_tail=approval_tail, approval=approval)
     if approval_conflict:
-        return Hold(page_id, classification, approval_conflict, net, tax, gross)
+        return Hold(
+            page_id,
+            classification,
+            approval_conflict,
+            net,
+            tax,
+            gross,
+            approval_tail=approval_tail,
+            approval=approval,
+            issue_date=issue_date,
+        )
     if kind == "invoice" and tax == 0:
         return Hold(
             page_id,
@@ -164,8 +245,11 @@ def map_row(row: Mapping[str, Any]) -> Mapped | Hold:
             net,
             tax,
             gross,
+            issue_date=issue_date,
+            approval_tail=approval_tail,
+            approval=approval,
         )
-    if kind == "invoice" and tax * 10 != net:
+    if kind == "invoice" and not _invoice_tax_within_one_won(net, tax):
         return Hold(
             page_id,
             classification,
@@ -173,15 +257,19 @@ def map_row(row: Mapping[str, Any]) -> Mapped | Hold:
             net,
             tax,
             gross,
+            issue_date=issue_date,
+            approval_tail=approval_tail,
+            approval=approval,
         )
+    processed_date = props.get("실제 처리일")
     event_date = _date_from(
-        props.get("실제 처리일") if isinstance(props.get("실제 처리일"), str) else None,
+        processed_date if isinstance(processed_date, str) else None,
         str(props.get("거래명") or ""),
         str(props.get("자연키") or ""),
         str(props.get("메모") or ""),
     )
     if event_date is None:
-        return Hold(page_id, classification, "no event date; not fixed", net, tax, gross)
+        return Hold(page_id, classification, "no event date; not fixed", net, tax, gross, issue_date=issue_date, approval_tail=approval_tail, approval=approval)
     tax_category = "standard" if kind == "invoice" else "unknown"
     keys = {"notion-page": page_id}
     if approval:
@@ -199,7 +287,9 @@ def map_row(row: Mapping[str, Any]) -> Mapped | Hold:
         tax_category=tax_category,
         deductible=None,
     )
-    return Mapped(page_id, classification, kind, direction, net, tax, gross, approval, keys, draft)
+    return Mapped(
+        page_id, classification, kind, direction, net, tax, gross, approval, keys, draft, issue_date=issue_date,
+    )
 
 
 def apply_external_amount_conflict(
@@ -225,7 +315,9 @@ def apply_external_amount_conflict(
         item.tax,
         item.gross,
         approval_tail=item.approval[-4:],
+        approval=item.approval,
         counterparty=item.draft.counterparty,
+        issue_date=item.issue_date,
         external_gross=observed[2],
     )
 
@@ -237,10 +329,10 @@ def purchase_match_verdict(loaded_gross: int, hometax_gross: int, holds: list[Ho
     """
     gap = hometax_gross - loaded_gross
     status = "PASS" if gap == 0 else "FAIL"
-    parts = []
+    parts: list[str] = []
     explained = 0
     for hold in holds:
-        if hold.classification != "매입" or hold.external_gross is None or hold.gross is None:
+        if getattr(hold, "classification", "") != "매입" or getattr(hold, "external_gross", None) is None or hold.gross is None:
             continue
         explained += hold.external_gross
         label = hold.counterparty or "held"
@@ -256,16 +348,21 @@ def purchase_match_verdict(loaded_gross: int, hometax_gross: int, holds: list[Ho
 
 
 def map_snapshot(
-    rows: list[Mapping[str, Any]],
+    rows: list[Mapping[str, JsonValue]],
     external_purchases: Mapping[str, tuple[int, int, int]] | None = None,
 ) -> MapReport:
     report = MapReport(rows=len(rows))
     external_purchases = external_purchases or {}
     for row in rows:
         item = apply_external_amount_conflict(map_row(row), external_purchases)
-        report.by_class[item.classification] = report.by_class.get(item.classification, 0) + 1
+        properties = row.get("properties")
+        props = properties if isinstance(properties, Mapping) else row
+        biz = supplier_biz_digits(props)
+        if biz:
+            item = replace(item, supplier_biz=biz)
         if isinstance(item, Hold):
             report.holds.append(item)
         else:
             report.loaded.append(item)
+            report.by_class[item.classification] = report.by_class.get(item.classification, 0) + 1
     return report

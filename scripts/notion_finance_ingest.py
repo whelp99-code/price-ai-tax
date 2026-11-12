@@ -10,7 +10,7 @@ import argparse
 import json
 import os
 import sqlite3
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 from price.auth import Actor
@@ -18,13 +18,27 @@ from price.db import Database
 import importlib.util
 
 from price.notion_finance_ingest import apply_drafts, edited_index
-from price.notion_finance_map import map_snapshot
+from price.notion_finance_map import Hold, Mapped, map_snapshot
+
+
+def _purchase_approval(item: Mapped | Hold) -> str | None:
+    if getattr(item, "classification", "") != "매입":
+        return None
+    approval = getattr(item, "approval", None)
+    if approval:
+        return approval
+    stored = getattr(item, "keys", {}).get("hometax-approval") if hasattr(item, "keys") else None
+    return stored or None
 
 _s2 = Path(__file__).with_name("notion_finance_s2.py")
 _spec = importlib.util.spec_from_file_location("notion_finance_s2", _s2)
 _mod = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_mod)
 read_hometax_purchases = _mod.read_hometax_purchases
+resolve_purchase_period = _mod.resolve_purchase_period
+parse_period_arg = _mod.parse_period_arg
+purchase_period_report = _mod.purchase_period_report
+read_hometax_purchase_sources = _mod.read_hometax_purchase_sources
 
 DEMO = Path("/home/jm/orca/projects/price/.data/demo.sqlite3").resolve()
 
@@ -69,9 +83,33 @@ def owner_actor(db: Database) -> tuple[str, Actor]:
         raise SystemExit("expected exactly one owner membership")
     return rows[0]["company_id"], Actor(rows[0]["id"], rows[0]["username"])
 
+def notion_page_url(page_id: str) -> str:
+    compact = page_id.replace("-", "")
+    if len(compact) == 32 and all(c in "0123456789abcdefABCDEF" for c in compact):
+        return f"https://app.notion.com/p/{compact.lower()}"
+    return f"https://app.notion.com/p/{page_id}"
+
+
+def missing_issue_date_message(mapped: object) -> str:
+    pages: list[str] = []
+    loaded = getattr(mapped, "loaded", ())
+    holds = getattr(mapped, "holds", ())
+    for item in (*loaded, *holds):
+        if getattr(item, "classification", "") != "매입":
+            continue
+        if isinstance(getattr(item, "issue_date", None), date):
+            continue
+        page_id = str(getattr(item, "page_id", "") or "")
+        pages.append(f"{page_id} {notion_page_url(page_id)}" if page_id else "page id missing")
+    listed = "; ".join(pages) if pages else "page id missing"
+    return f"purchase issue date missing; period match blocked; count={len(pages)}; {listed}"
+
+
 
 def main() -> None:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--period-start")
+    parser.add_argument("--period-end")
     parser.add_argument("--snapshot", type=Path, required=True)
     parser.add_argument("--db", type=Path, required=True)
     parser.add_argument("--hometax-dir", type=Path)
@@ -80,12 +118,26 @@ def main() -> None:
     args = parser.parse_args()
     db_path = refuse_demo(args.db)
     backup_path = None
-    if args.backup_dir:
-        backup_path = backup_sqlite(db_path, args.backup_dir)
     payload = json.loads(args.snapshot.read_text())
     finance = payload["finance"]
-    hometax = read_hometax_purchases(args.hometax_dir) if args.hometax_dir else {}
+    if args.hometax_dir:
+        period = resolve_purchase_period(
+            args.hometax_dir,
+            parse_period_arg(args.period_start, "period start") if args.period_start else None,
+            parse_period_arg(args.period_end, "period end") if args.period_end else None,
+        )
+        hometax, separate = read_hometax_purchase_sources(args.hometax_dir, period)
+    else:
+        if args.period_start or args.period_end:
+            raise SystemExit("period requires --hometax-dir")
+        hometax, separate = {}, []
+        period = None
     mapped = map_snapshot(finance, hometax)
+    period_report = purchase_period_report(mapped, period) if period is not None else None
+    if period_report is not None and period_report["blocked"]:
+        raise SystemExit(missing_issue_date_message(mapped))
+    if args.backup_dir:
+        backup_path = backup_sqlite(db_path, args.backup_dir)
     db = Database(db_path)
     with db.connect() as c:
         journals_before = c.execute("SELECT count(*) FROM objects WHERE kind='journal'").fetchone()[0]
@@ -93,6 +145,50 @@ def main() -> None:
     result = apply_drafts(db, actor, company, mapped, edited_index(finance))
     result["backup"] = str(backup_path) if backup_path else None
     result["journals_before"] = int(journals_before)
+    result["hometax_numeric"] = len(hometax)
+    result["hometax_separate_non_digit"] = len(separate)
+    notion_approvals = {
+        approval
+        for item in (*mapped.loaded, *mapped.holds)
+        if (approval := _purchase_approval(item))
+    }
+    matched_approvals = {
+        approval
+        for approval in notion_approvals
+        if approval in hometax
+        and next(
+            (
+                (item.net, item.tax, item.gross)
+                for item in (*mapped.loaded, *mapped.holds)
+                if _purchase_approval(item) == approval
+                and not getattr(item, "held", False)
+                and item.net is not None
+                and item.tax is not None
+                and item.gross is not None
+            ),
+            None,
+        )
+        == hometax[approval]
+    }
+    result["hometax_matched"] = len(matched_approvals)
+    result["hometax_separate"] = [
+        {"approval_tail": item.get("approval_tail", ""), "gross": item.get("gross", ""), "reason": item.get("reason", "")}
+        for item in separate
+    ]
+    result["hometax_separate_gross"] = sum(int(item.get("gross") or 0) for item in separate)
+    result["hometax_all_row_gross"] = sum(item[2] for item in hometax.values()) + result["hometax_separate_gross"]
+    if period_report is not None:
+        result["purchase_period"] = {
+            "start": period_report["period_start"],
+            "end": period_report["period_end"],
+            "inside_count": period_report["in_count"],
+            "inside_gross": period_report["in_gross"],
+            "outside_count": period_report["out_count"],
+            "outside_gross": period_report["out_gross"],
+            "missing_issue_date_count": period_report["missing_issue_date_count"],
+            "pass_blocked": period_report["blocked"],
+        }
+    result["core_ingest_reads_hometax"] = False
     if result["journals"] != int(journals_before):
         raise SystemExit("draft ingest created a journal")
     text = json.dumps(result, ensure_ascii=False)

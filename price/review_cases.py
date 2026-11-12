@@ -59,10 +59,10 @@ class ReviewCases:
             row=self.db.create(c,company,'expert_review',value,ident=ident);self.db.audit(c,company,actor.id,'review.opened',ident)
             return row
 
-    def _fresh(self,c,company,ident,expected):
+    def _fresh(self,c,company,ident,expected,source_context=None):
         review=self.db.get(c,company,'expert_review',ident)
         if review['revision']!=expected:raise DomainError('STALE_VERSION','검토 상태가 바뀌었습니다.')
-        event=self.work._fresh_event(c,company,review['event_id'])
+        event=self.work._fresh_event(c,company,review['event_id'],context=source_context)
         if review['source_context_hash']!=event['context_hash']:raise DomainError('REVIEW_SOURCE_CHANGED','검토 대상 원본이 바뀌었습니다.')
         if review['fact_context_hash']!=digest(self.work._answers(c,company,event)):raise DomainError('REVIEW_FACT_CHANGED','검토 중 업무 사실이 바뀌었습니다.')
         return review

@@ -9,7 +9,7 @@ import json
 from collections import defaultdict
 from datetime import date,timedelta
 from decimal import Decimal
-from typing import Annotated,Literal
+from typing import Annotated,Literal,TypedDict
 from pydantic import Field,StrictInt,StrictStr,model_validator
 from .db import DomainError,digest
 from .upload_models import UploadInput
@@ -48,7 +48,13 @@ def asset_schedule(cost:int,salvage:int,months:int,start:date):
     return {'method':'book_straight_line_full_month_proposal','cost':cost,'salvage':salvage,'periods':parts,'tax_depreciation_verified':False}
 
 
-def fifo_cost(lots:list[dict],quantity:int):
+class InventoryLot(TypedDict):
+    id: str
+    quantity: int
+    total_cost: int
+
+
+def fifo_cost(lots:list[InventoryLot],quantity:int):
     if type(quantity) is not int or quantity<=0:raise ValueError('Positive integer quantity required')
     if not isinstance(lots,list) or len(lots)>10000:raise ValueError('Inventory lot limit')
     total_qty=0;ids=set()
@@ -116,6 +122,17 @@ def source_snapshot(db,c,company,period):
     return {'documents':documents,'company_facts':db.list(c,company,'company_facts'),'event_facts':db.list(c,company,'event_fact')}
 
 
+class AccountTotal(TypedDict):
+    debit: int
+    credit: int
+    journal_ids: list[str]
+
+class OwnerReportQuery(UploadInput):
+    start: date
+    end: date
+    expected_source_revision: Annotated[StrictStr,Field(pattern=r'^sha256:[a-f0-9]{64}$',max_length=71)]|None=None
+
+
 class ScheduleInput(UploadInput):
     kind:Literal['accrual','asset']
     label:Annotated[StrictStr,Field(min_length=1,max_length=120)]
@@ -147,15 +164,21 @@ class FinanceOps:
                 old=self.db.get(c,company,'accounting_schedule',key)
                 if old['request_hash']!=request_hash:raise DomainError('SCHEDULE_KEY_CONFLICT','같은 일정 번호에 다른 조건이 있습니다.')
                 return old
-            calculated=prorate_days(data.cost,data.start,data.end) if data.kind=='accrual' else asset_schedule(data.cost,data.salvage,data.months,data.start)
+            if data.kind=='accrual':
+                assert data.end is not None
+                calculated=prorate_days(data.cost,data.start,data.end)
+            else:
+                assert data.months is not None
+                calculated=asset_schedule(data.cost,data.salvage,data.months,data.start)
             schedule=self.db.create(c,company,'accounting_schedule',{'input':body,'request_hash':request_hash,'result':calculated,'author':actor.id,'state':'PROPOSED','posting_performed':False,'tax_rule_verified':False},ident=key)
             self.db.audit(c,company,actor.id,'schedule.proposed',key,{'kind':data.kind,'cost':data.cost})
             return schedule
 
-    def report(self,actor,company,start:date,end:date):
+    def report(self,actor,company,start:date,end:date,expected_source_revision:str|None=None):
         if start>end:raise DomainError('PERIOD_RANGE','보고 기간이 맞지 않습니다.',422)
         with self.db.connect() as c:
-            self.auth.guard(c,actor,company)
+            c.execute('BEGIN')
+            role=self.auth.guard(c,actor,company)
             all_journals=[j for j in self.db.list(c,company,'journal') if j['state']=='POSTED' and j['event_date']<=end.isoformat()]
             journals=[j for j in all_journals if start.isoformat()<=j['event_date'] and j.get('current_period_activity') is not False]
             opening=next((j for j in all_journals if j.get('opening_batch_id') and j['event_date']<=start.isoformat()),None)
@@ -163,10 +186,13 @@ class FinanceOps:
             cash_amount=lambda entries:sum(l['amount']*(1 if l['side']=='debit' else -1) for j in entries for l in j['lines'] if l['account']=='cash')
             opening_cash=cash_amount([j for j in all_journals if j['event_date']<start.isoformat() or j.get('opening_batch_id')]) if opening else None
             closing_cash=cash_amount(all_journals) if opening else None
-            totals=defaultdict(lambda:{'debit':0,'credit':0,'journal_ids':[]})
+            totals: defaultdict[str,AccountTotal]=defaultdict(lambda:AccountTotal(debit=0,credit=0,journal_ids=[]))
             for j in journals:
                 for line in j['lines']:
-                    item=totals[line['account']];item[line['side']]+=line['amount'];item['journal_ids'].append(j['id'])
+                    item=totals[line['account']]
+                    if line['side']=='debit':item['debit']+=line['amount']
+                    else:item['credit']+=line['amount']
+                    item['journal_ids'].append(j['id'])
             net=lambda account:totals[account]['debit']-totals[account]['credit']
             cash_in=totals['cash']['debit'];cash_out=totals['cash']['credit']
             from .journal_lineage import internal_entry
@@ -175,9 +201,28 @@ class FinanceOps:
             internal_out=sum(l['amount'] for j in internal for l in j['lines'] if l['account']=='cash' and l['side']=='credit')
             cash_in-=internal_in;cash_out-=internal_out
             revenue=-sum(net(account) for account in INCOME_ACCOUNTS);expense=sum(net(account) for account in EXPENSE_ACCOUNTS)
-            return {'period':{'start':start.isoformat(),'end':end.isoformat()},'basis':'posted_validation_ledger',
+            from .event_settlements import EventSettlements
+            payable_coverage=EventSettlements(self.service).report(actor,company,as_of=end,connection=c)
+            period={'start':start.isoformat(),'end':end.isoformat()}
+            source_revision='sha256:'+digest({
+                'company':company,'contract':'price.owner-report/2','period':period,
+                'posted_journals':all_journals,
+                'originals':source_snapshot(self.db,c,company,{'start':'0001-01-01','end':'9999-12-31'}),
+                'economic_events':self.db.list(c,company,'economic_event'),
+                'settlements':self.db.list(c,company,'event_settlement'),
+                'source_impacts':self.db.list(c,company,'source_change_impact'),
+                'crm_candidate_links':self.db.list(c,company,'crm_candidate_link'),
+                'crm_company_binding':self.db.list(c,company,'crm_company_binding'),
+            })
+            if expected_source_revision is not None and expected_source_revision!=source_revision:
+                raise DomainError('REPORT_SOURCE_CHANGED','보고 원본이 바뀌었습니다. 최신 결과와 원본을 다시 확인하세요.',409)
+            return {'period':period,'basis':'posted_validation_ledger',
+                    'company_id':company,'native_contract':'price.owner-report/2','source_revision':source_revision,
+                    'read_identity':{'mode':'native_membership_non_worker','role':role,'worker':False},
+                    'crm_company_binding':next(iter(self.db.list(c,company,'crm_company_binding')),None),
                     'cash':{'received':cash_in,'paid':cash_out,'net_movement':cash_in-cash_out,'opening_balance':opening_cash,'closing_balance':closing_cash,'opening_balance_verified':bool(opening),'internal_transfers':{'received':internal_in,'paid':internal_out,'net_movement':internal_in-internal_out}},
                     'profit':{'revenue':revenue,'expenses':expense,'net':revenue-expense,'not_cash_balance':True},
                     'account_totals':dict(totals),'journal_ids':[j['id'] for j in journals],
                     'blockers':uploaded_source_blockers(self.db,c,company,{'start':start.isoformat(),'end':end.isoformat()}),
+                    'payable_coverage':payable_coverage,
                     'official_tax_ready':False,'company_data_complete':False,'notice':'확정된 검증 장부에서 집계했습니다. 기초잔액과 전체 자료의 완전성은 별도 확인이 필요합니다.'}

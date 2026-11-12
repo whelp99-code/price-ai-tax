@@ -96,6 +96,16 @@ def test_zero_tax_invoice_not_guessed():
     assert held.held and "not fixed" in held.reason
 
 
+def test_invoice_tax_allows_one_won_and_holds_two() -> None:
+    within = map_row(_row(금액=1000, 부가세=99, 합계=1099, page="page-tax-minus-one"))
+    above = map_row(_row(금액=1000, 부가세=101, 합계=1101, page="page-tax-plus-one"))
+    rounded = map_row(_row(금액=276836, 부가세=27684, 합계=304520, page="page-tax-rounded"))
+    low = map_row(_row(금액=1000, 부가세=98, 합계=1098, page="page-tax-minus-two"))
+    high = map_row(_row(금액=1000, 부가세=102, 합계=1102, page="page-tax-plus-two"))
+    assert not within.held and not above.held and not rounded.held
+    assert low.held and high.held
+    assert "10 percent" in low.reason and "10 percent" in high.reason
+
 def test_event_date_from_processed_field():
     mapped = map_row(_row(**{"실제 처리일": "2026-08-13T18:58:00.000+09:00"}))
     assert mapped.draft.event_date == date(2026, 8, 13)
@@ -127,6 +137,13 @@ def test_verdict_fails_on_hardcoded_pass_string():
     assert purchase_match_verdict(194_911_200, 194_911_200, [])["status"] == "PASS"
     script = Path(__file__).resolve().parents[1].joinpath("scripts/notion_finance_s2.py").read_text()
     assert "PASS after hold resolved" not in script
+def test_labeled_approval_keeps_label_and_tail_is_not_merged():
+    memo = "홈택스 승인번호: 20261015-41000021-b0009795"
+    held = map_row(_row(자연키="bank|page-label", 메모=memo, page="page-label-tail"))
+    assert held.held
+    assert "not a complete 24-digit number" in held.reason
+    assert held.approval_tail == "9795"
+    assert "20261015-41000021-b0009795" not in held.reason
 
 
 def test_missing_bank_tax_is_zero_not_invented_invoice_tax():

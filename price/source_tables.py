@@ -5,6 +5,7 @@ company ownership, or whether an inflow is revenue.
 """
 from __future__ import annotations
 import csv
+from collections.abc import Mapping
 import io
 import re
 import unicodedata
@@ -12,7 +13,7 @@ from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from .ingest_safety import text_decode, MAX_TEXT_CELL
 
-PARSER_VERSION = 'korean-source-table/3'
+PARSER_VERSION = 'korean-source-table/4'
 MAX_ROWS = 20_000
 MAX_COLUMNS = 128
 MAX_CELLS = 500_000
@@ -20,7 +21,15 @@ ALIASES = {
     'counterparty_id': ('상대방사업자등록번호', '거래처사업자번호'),
     'counterparty_account': ('상대계좌번호', '상대방계좌번호'),
     'settlement_reference': ('청구참조번호', '결제대상승인번호'),
-    'date': ('거래일자', '거래일시', '거래일', '승인일자', '승인일시', '이용일자', '작성일자', '작성일'),
+    'order_reference': ('발주참조번호',),
+    'project_id': ('프로젝트ID',),
+    'order_status': ('발주상태',),
+    'payment_terms': ('지급조건',),
+    'delivery_status': ('납품상태',),
+    'claim_status': ('청구상태',),
+    'due_date': ('지급기일',),
+    'cash_kind': ('자금성격',),
+    'date': ('거래일자', '거래일시', '거래일', '승인일자', '승인일시', '이용일자', '작성일자', '작성일', '발주일자'),
     'issued_date': ('발급일자', '발급일시'),
     'transmitted_date': ('전송일자', '전송일시'),
     'description': ('거래내용', '적요', '내용', '표시내용', '상대방', '거래처', '가맹점명', '가맹점', '사용처'),
@@ -32,8 +41,8 @@ ALIASES = {
     'currency': ('통화', '통화코드', '화폐'),
     'net': ('공급가액', '공급금액'),
     'tax': ('세액', '부가세', '부가가치세'),
-    'gross': ('합계금액', '총금액', '승인금액', '이용금액', '결제금액'),
-    'reference': ('승인번호', '거래번호', '전자세금계산서승인번호', '세금계산서번호'),
+    'gross': ('합계금액', '총금액', '승인금액', '이용금액', '결제금액', '발주금액'),
+    'reference': ('승인번호', '거래번호', '전자세금계산서승인번호', '세금계산서번호', '발주번호'),
     'supplier_id': ('공급자사업자등록번호', '공급자등록번호', '공급자사업자번호'),
     'supplier_name': ('공급자상호', '공급자상호법인명'),
     'buyer_id': ('공급받는자사업자등록번호', '공급받는자등록번호', '공급받는자사업자번호'),
@@ -93,11 +102,13 @@ def _mapping(row):
     if repeated:
         return None
     kinds = []
+    if {'date', 'reference', 'project_id', 'supplier_id', 'buyer_id', 'gross', 'order_status'}.issubset(found):
+        kinds.append('purchase_order')
     if {'date', 'credit', 'debit'}.issubset(found):
         kinds.append('bank_statement')
     if {'date', 'net', 'tax'}.issubset(found) and ('reference' in found or {'supplier_id', 'buyer_id'}.issubset(found)):
         kinds.append('tax_invoice_list')
-    if {'date', 'gross', 'description'}.issubset(found) and ('card' in found or 'reference' in found) and 'net' not in found:
+    if {'date', 'gross', 'description'}.issubset(found) and ('card' in found or 'reference' in found) and 'net' not in found and 'order_status' not in found:
         kinds.append('card_transactions')
     return (kinds[0], found) if len(kinds) == 1 else None
 
@@ -127,7 +138,7 @@ def _issue(row, code, field=None):
     return value
 
 
-def parse_source_table(raw: bytes) -> dict:
+def parse_source_table(raw: bytes) -> Mapping[str, object]:
     from .opening_sources import try_parse_opening
     opening=try_parse_opening(raw)
     if opening is not None:return opening
@@ -191,13 +202,14 @@ def parse_source_table(raw: bytes) -> dict:
             raw_fields = {field: row[col].strip() for field, col in fields.items()}
             first = next((v.strip() for v in row if v.strip()), '')
             if re.fullmatch(r'(?:총\s*)?합\s*계(?:\s*[:：]?)?', first):
-                control = {'row': line, 'values': {}}
+                control_values: dict[str, str] = {}
+                control = {'row': line, 'values': control_values}
                 try:
                     for field in ('credit', 'debit', 'net', 'tax', 'gross'):
                         if field in raw_fields:
                             parsed = amount(raw_fields[field])
                             if parsed is not None:
-                                control['values'][field] = parsed
+                                control_values[field] = parsed
                     if not control['values']:
                         raise ValueError('TOTAL_ROW_EMPTY')
                     controls.append(control)
@@ -215,7 +227,7 @@ def parse_source_table(raw: bytes) -> dict:
                     evidence[field] = {'row': line, 'column': fields[field] + 1, 'header': header[fields[field]], 'raw': value}
                     if field in ('credit', 'debit', 'net', 'tax', 'gross', 'balance'):
                         values[field] = amount(value, blank_zero=field in ('credit', 'debit'))
-                    elif field in ('date', 'issued_date', 'transmitted_date'):
+                    elif field in ('date', 'issued_date', 'transmitted_date', 'due_date'):
                         values[field] = date_value(value) if value or field == 'date' else None
                     else:
                         values[field] = value or None
@@ -236,6 +248,14 @@ def parse_source_table(raw: bytes) -> dict:
                         raise ValueError('BANK_DIRECTION_AMBIGUOUS')
                     values['direction'] = 'receipt' if credit else 'payment'
                     values['gross'] = str(credit or debit)
+                    values['tax'] = None
+                    values['tax_inferred'] = False
+                    if values.get('cash_kind') and values['cash_kind'] not in ('payment', 'advance', 'fee', 'refund'):
+                        raise ValueError('CASH_KIND_REVIEW')
+                elif kind == 'purchase_order':
+                    if values.get('gross') is not None and Decimal(values['gross']) < 0:
+                        raise ValueError('ORDER_AMOUNT_INVALID')
+                    values['direction'] = None
                     values['tax'] = None
                     values['tax_inferred'] = False
                 elif kind == 'tax_invoice_list':

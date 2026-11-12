@@ -3,17 +3,17 @@
 Owner screens consume summaries; specialist inputs stay on the review API.
 No API caller can install an adapter or enable live financial execution.
 """
-from datetime import date
 from typing import Annotated
-from fastapi import Depends
+from fastapi import Depends,Query
 from .auth import Actor
-from .finance_ops import FinanceOps,ScheduleInput
+from .finance_ops import FinanceOps,OwnerReportQuery,ScheduleInput
 from .tax_workpapers import TaxWorkpapers,CorporateWorkpaperInput,CarryforwardInput,PayrollReconciliationInput
 from .review_cases import ReviewCases,ReviewRequest,ReviewAssignment,ReviewFinding,ReviewRevision
 from .submission_gateway import SubmissionGateway,PackageInput,PackageRevision
 from .release_readiness import ReleaseReadiness
 from .pipeline_health import PipelineHealth
 from .discrepancies import Discrepancies
+from .crm_bindings import CRMCompanyBindings, CRMCompanyCandidate
 
 
 def register_operations_routes(app,service,actor_dependency):
@@ -25,13 +25,29 @@ def register_operations_routes(app,service,actor_dependency):
     app.state.submission_gateway=gateway;app.state.release_readiness=release
     p='/api/companies/{company}'
 
+    crm_bindings=CRMCompanyBindings(service)
+
+    @app.post(p+'/crm-company-binding',status_code=201)
+    def register_crm_company_binding(company:str,data:CRMCompanyCandidate,
+                                    a:Annotated[Actor,Depends(actor_dependency)]):
+        return crm_bindings.register(a,company,data)
+
+    @app.get(p+'/crm-company-binding')
+    def get_crm_company_binding(company:str,a:Annotated[Actor,Depends(actor_dependency)]):
+        return crm_bindings.get(a,company)
+
     @app.get(p+'/discrepancies')
-    def discrepancy_list(company:str,a:Annotated[Actor,Depends(actor_dependency)]):
-        return discrepancies.list(a,company)
+    def list_discrepancies(company:str,a:Annotated[Actor,Depends(actor_dependency)],
+                           amount_only:bool=False):
+        return discrepancies.list(a,company,amount_only=amount_only)
+
+    @app.post(p+'/discrepancies/{ident}/invalidate')
+    def invalidate_discrepancy(company:str,ident:str,a:Actor=Depends(actor_dependency)):
+        return discrepancies.invalidate_changed_source(a,company,ident)
 
     @app.get(p+'/owner/reports')
-    def owner_report(company:str,start:date,end:date,a:Actor=Depends(actor_dependency)):
-        return finance.report(a,company,start,end)
+    def owner_report(company:str,data:Annotated[OwnerReportQuery,Query()],a:Actor=Depends(actor_dependency)):
+        return finance.report(a,company,data.start,data.end,data.expected_source_revision)
 
     @app.post(p+'/accounting-schedules',status_code=201)
     def schedule(company:str,data:ScheduleInput,a:Actor=Depends(actor_dependency)):

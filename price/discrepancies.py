@@ -128,7 +128,7 @@ class Discrepancies:
         self.db = service.db
         self.reviews = ReviewCases(service)
 
-    def list(self, actor, company) -> InboxReport:
+    def list(self, actor, company, *, amount_only: bool = False) -> InboxReport:
         with self.db.connect() as c:
             c.execute("BEGIN")
             try:
@@ -147,6 +147,13 @@ class Discrepancies:
                     self._review_item(c, company, row, source_context)
                     for row in reviews
                 )
+                if amount_only:
+                    items = [
+                        item for item in items
+                        if item["differences"] is not None
+                        and any(delta is not None and delta != "0"
+                                for delta in item["differences"].values())
+                    ]
                 report = InboxReport(items=items, read_only=True, live_source_checked=False)
             finally:
                 c.rollback()
@@ -223,7 +230,7 @@ class Discrepancies:
         freshness_reason = "SOURCE_INVALIDATED" if row.get("state") == INVALIDATED_STATE else None
         if freshness_reason is None:
             try:
-                self.reviews._fresh(c, company, ident, revision)
+                self.reviews._fresh(c, company, ident, revision, source_context=source_context)
             except DomainError as error:
                 if error.code == "REVIEW_FACT_CHANGED":
                     freshness_reason = "FACT_CHANGED"
