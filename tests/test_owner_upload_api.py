@@ -1,5 +1,7 @@
 from __future__ import annotations
 import hashlib
+import json
+import subprocess
 import pytest
 from fastapi.testclient import TestClient
 from price.api import create_app
@@ -366,3 +368,17 @@ def test_document_context_action_is_separate_from_reader_attention(web, w):
             'source_hash': action['source_hash'], 'generation': action['generation'], 'identifier': '123456789012',
             'currency': 'USD', 'confirmed': True, 'idempotency_key': 'web-doc-context-02'})
         assert denied.status_code == 403
+
+def test_unconfirmed_company_viewer_has_no_fact_form_while_server_still_rejects(w):
+    rendered = json.loads(subprocess.check_output(['node', 'scripts/check_owner_fact_boundary.mjs']))
+    assert rendered['viewer'] == {'account_entry': 0, 'fact_inputs': 0, 'save_buttons': 0}
+    assert rendered['owner']['account_entry'] >= 1 and rendered['owner']['fact_inputs'] >= 1 and rendered['owner']['save_buttons'] == 1
+    view = OwnerView(w.svc, Ingestion(w.svc).uploads)
+    with pytest.raises(DomainError) as error:
+        view.confirm(w.viewer, w.company, CompanyFactsInput(
+            expected_revision=0, name='시험 회사 A', business_number='2222222222', mode='company', confirmed=True,
+            instruments=[{'kind': 'bank', 'identifier': '123456789012', 'currency': 'KRW'}]))
+    assert error.value.code == 'FORBIDDEN'
+    with w.db.connect() as c:
+        assert not w.db.list(c, w.company, 'company_facts')
+        assert not w.db.list(c, w.company, 'journal')

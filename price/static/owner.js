@@ -84,14 +84,15 @@ function renderHome(home, batches) {
   const questions = $('#owner-questions'); questions.replaceChildren();
   const pendingInstruments = home.pending_instrument_candidates || [];
   const ownerAccount = (home.owner_actions || []).find(item => item.kind === 'confirm_owner_account');
-  if (home.needs_company_confirmation || pendingInstruments.length) {
+  const canConfirmFacts = home.company.role === 'owner';
+  if (canConfirmFacts && (home.needs_company_confirmation || pendingInstruments.length)) {
     const card = element('div', undefined, 'note');
     card.append(element('p', home.needs_company_confirmation ? '이 자료함의 회사와 회사 소유 계좌 정보를 확인해 주세요.' : '원본에서 계좌·카드 후보를 찾았습니다. 우리 회사 자료인 것만 선택해 주세요.'), button('회사 계좌·카드 확인', showOnboarding, 'primary'));
     questions.append(card);
-  } else if (ownerAccount) {
+  } else if (canConfirmFacts && ownerAccount) {
     const card = element('div', undefined, 'note');
     card.append(element('p', ownerAccount.label));
-    if (home.company.role === 'owner') card.append(button('내 계좌 사실 확인', showOnboarding, 'primary'));
+    card.append(button('내 계좌 사실 확인', showOnboarding, 'primary'));
     questions.append(card);
   } else questions.append(element('p','현재 대표님께 추가로 요청한 회사 사실이 없습니다.'));
   for (const action of (home.owner_actions || []).filter(item => item.kind === 'confirm_document_context')) {
@@ -143,6 +144,7 @@ async function showExtraction(id, filename) {
   } catch (error) { $('#owner-dialog-error').textContent = error.message; }
 }
 async function confirmDocumentContext(action) {
+  if (state.home?.company?.role !== 'owner') return;
   const root = openDialog((action.filename || '자료') + ' · 계좌·통화 확인');
   root.append(element('p', '원본 파일과 읽은 칸은 바꾸지 않습니다. 회사 계좌는 이 문서의 후보일 뿐이며, 계좌에 저장된 통화가 원본 행의 통화를 채우지 않습니다.'));
   if (!action.candidates || !action.candidates.length) {
@@ -198,6 +200,7 @@ async function confirmDocumentContext(action) {
   root.append(form);
 }
 async function showOnboarding() {
+  if (state.home?.company?.role !== 'owner') return;
   const current = await request(prefix('/owner/onboarding'));
   const root = openDialog('회사 정보 확인'); root.append(element('p', current.notice));
   const form = document.createElement('form'); form.id = 'company-facts-form';

@@ -1,0 +1,37 @@
+{
+  "data": "synthetic",
+  "width": 1440,
+  "viewer": {
+    "account_buttons": 0,
+    "fact_inputs": 0,
+    "save_buttons": 0,
+    "dialog_open": false
+  },
+  "layout": {
+    "logout_lines": 1,
+    "choice_count": 9,
+    "choice_lines": [
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1
+    ]
+  },
+  "owner": {
+    "shows_cash_reason": true
+  },
+  "db": {
+    "journals": 0,
+    "facts": 1,
+    "source_account": null,
+    "source_currency": null,
+    "blob_matches_upload": true,
+    "applied_to_original": false
+  },
+  "status": "PASS"
+}
