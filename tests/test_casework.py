@@ -574,3 +574,84 @@ def test_owner_account_response_is_identical_whether_other_company_registered_it
     assert absent['accounting_complete'] is False and absent['journals'] == []
     assert absent['missing_document'] == absent['foreign_document']
     assert absent['missing_document'][0] == 404 and absent['missing_document'][1]['code'] == 'NOT_FOUND'
+
+def test_business_number_response_is_identical_whether_other_company_registered_it(tmp_path, pristine):
+    backup, company, owner, actors, other_company, other_owner = pristine
+    number = '4444444444'
+    worlds = {}
+    for name, register_other in (('absent', False), ('present', True)):
+        target = tmp_path / f'bn-{name}.sqlite3'
+        shutil.copyfile(backup, target)
+        db = Database(target)
+        svc = Service(db)
+        if register_other:
+            OwnerView(svc, Ingestion(svc).uploads).confirm(other_owner, other_company, CompanyFactsInput(
+                expected_revision=0, name='시험 회사 B', business_number='444-44-44444', mode='company', confirmed=True))
+        worlds[name] = target
+
+    def client_for(path):
+        app = create_app(path)
+        client = TestClient(app)
+        client.__enter__()
+        login = client.post('/api/login', json={'username': 'test-owner', 'password': PASSWORD})
+        assert login.status_code == 200
+        client.headers['x-csrf-token'] = login.json()['csrf']
+        return client
+
+    def observe(path):
+        client = client_for(path)
+        try:
+            base = '/api/companies/' + company
+            saved = client.post(base + '/owner/onboarding', json={
+                'expected_revision': 0, 'name': '시험 회사 A', 'business_number': '444-44-44444', 'mode': 'company', 'confirmed': True, 'instruments': []})
+            home = client.get(base + '/owner/home')
+            audit = client.get(base + '/audit')
+        finally:
+            client.__exit__(None, None, None)
+        db = Database(path)
+        with db.connect() as c:
+            stored = db.list(c, company, 'company_facts')
+        return {
+            'status': saved.status_code,
+            'body': _visible(saved.json()),
+            'home_status': home.status_code,
+            'home': _visible(home.json()),
+            'actions': _visible(home.json().get('owner_actions')),
+            'audit_actions': [event.get('action') for event in audit.json().get('events', [])],
+            'stored': _visible(stored),
+        }
+
+    absent = observe(worlds['absent'])
+    present = observe(worlds['present'])
+    assert absent == present
+    assert absent['status'] == 200
+    assert absent['body']['business_number'] == number
+    assert absent['body']['legal_registry_verified'] is False
+    assert absent['home']['accounting_complete'] is False
+    assert 'COMPANY_IDENTITY_CONFLICT' not in str(absent['body'])
+
+    def locked(path):
+        db = Database(path)
+        svc = Service(db)
+        world = World(db, svc, company, owner, actors['reviewer'], actors['preparer'], actors['viewer'], other_company, other_owner)
+        import base64
+        world.evidence = svc.upload_evidence(owner, company, 'test.txt', base64.b64encode(b'SYNTHETIC ACCOUNTING EVIDENCE - NOT REAL TAX DATA').decode())['id']
+        world.post(world.tx())
+        client = client_for(path)
+        try:
+            base = '/api/companies/' + company
+            current = client.get(base + '/owner/onboarding').json()
+            denied = client.post(base + '/owner/onboarding', json={
+                'expected_revision': current['revision'], 'name': '시험 회사 A', 'business_number': '5555555555', 'mode': 'company', 'confirmed': True, 'instruments': []})
+            home = client.get(base + '/owner/home')
+        finally:
+            client.__exit__(None, None, None)
+        with Database(path).connect() as c:
+            stored = Database(path).list(c, company, 'company_facts')
+        return {'status': denied.status_code, 'body': denied.json(), 'stored_number': stored[0]['business_number'], 'actions': _visible(home.json().get('owner_actions')), 'accounting_complete': home.json()['accounting_complete']}
+
+    locked_absent = locked(worlds['absent'])
+    locked_present = locked(worlds['present'])
+    assert locked_absent == locked_present
+    assert locked_absent['status'] == 409 and locked_absent['body']['code'] == 'COMPANY_IDENTITY_LOCKED'
+    assert locked_absent['stored_number'] == number and locked_absent['accounting_complete'] is False

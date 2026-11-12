@@ -103,10 +103,6 @@ class OwnerView:
             if data.expected_revision != (current['revision'] if current else 0):
                 raise DomainError('STALE_VERSION', '회사 정보가 바뀌었습니다. 현재 내용을 다시 확인하세요.')
             number = data.business_number.replace('-', '')
-            if number:
-                other = c.execute("SELECT 1 FROM objects WHERE kind='company_facts' AND company_id<>? AND json_extract(body,'$.business_number')=?", (company, number)).fetchone()
-                if other:
-                    raise DomainError('COMPANY_IDENTITY_CONFLICT', '다른 작업공간과 회사 식별 정보가 충돌합니다. 운영 확인이 필요합니다.')
             if current and current.get('business_number') and number != current['business_number']:
                 if any(j.get('state') == 'POSTED' for j in self.db.list(c, company, 'journal')):
                     raise DomainError('COMPANY_IDENTITY_LOCKED', '확정 장부가 있는 회사의 식별 정보 변경은 별도 이관 검토가 필요합니다.')
