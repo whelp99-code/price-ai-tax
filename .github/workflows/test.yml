@@ -13,3 +13,5 @@ jobs:
           python-version: "3.12"
       - run: pip install -e ".[test]"
       - run: pytest tests/test_notion_finance_ingest.py tests/test_notion_finance_map.py
+      - name: upload and read pipeline tests
+        run: pytest tests/test_owner_upload_api.py tests/test_extraction_api.py
