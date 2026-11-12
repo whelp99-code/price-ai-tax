@@ -1,7 +1,7 @@
 """Owner factual workflow endpoints; all company access is server checked."""
 from fastapi import Depends
 from .auth import Actor
-from .casework import Casework,FactAnswer
+from .casework import Casework,FactAnswer,question_views
 from .event_settlements import EventSettlements,SettlementInput
 
 
@@ -17,9 +17,7 @@ def register_casework_routes(app,service,actor_dependency):
     @app.get(base+'/owner/questions')
     def owner_questions(company:str,a:Actor=Depends(actor_dependency)):
         events=work.list(a,company)
-        questions=[{'event_id':e['id'],'expected_revision':e['revision'],'context_hash':e['context_hash'],
-                    'date':e['values']['date'],'gross':e['values']['gross'],'currency':e['values']['currency'],
-                    'counterparty':e['display_counterparty'],**q} for e in events for q in e['questions']]
+        questions=question_views(events)
         return {'questions':questions,'review_connection_needed':sum(e['state']=='REVIEW_CONNECTION_NEEDED' for e in events),'source_changed':sum(e['state']=='SOURCE_CHANGED' for e in events),'expert_assignee':None}
 
     @app.post(base+'/events/{ident}/facts')

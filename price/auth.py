@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import hashlib
 import hmac
 import secrets
@@ -24,6 +25,31 @@ def password_hash(password: str, salt: str) -> str:
 def token_hash(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
+
+LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+
+
+def normalize_host(host: str | None) -> str:
+    if not host:
+        return ""
+    value = host.strip().lower()
+    if value.startswith("[") and value.endswith("]"):
+        value = value[1:-1]
+    return value
+
+
+def login_disabled_requested() -> bool:
+    return os.getenv("PRICE_LOGIN_DISABLED") == "1"
+
+
+def public_bind_enabled() -> bool:
+    return os.getenv("PRICE_ALLOW_PUBLIC_BIND") == "1"
+
+
+def passwordless_login_permitted(request_host: str | None, server_host: str | None) -> bool:
+    if not login_disabled_requested() or public_bind_enabled():
+        return False
+    return normalize_host(request_host) in LOOPBACK_HOSTS and normalize_host(server_host) in LOOPBACK_HOSTS
 
 @dataclass(frozen=True)
 class Actor:
@@ -98,6 +124,30 @@ class Auth:
             raise failure
         assert authenticated is not None
         return authenticated
+
+    def issue_sole_owner_session(self) -> tuple[str, Actor]:
+        with self.db.transaction() as c:
+            rows = c.execute(
+                "SELECT u.id, u.username, u.disabled FROM memberships m "
+                "JOIN users u ON u.id=m.user_id WHERE m.role='owner'"
+            ).fetchall()
+            if len(rows) != 1 or row_value(rows[0], "disabled", int):
+                raise DomainError(
+                    "SOLE_OWNER_REQUIRED",
+                    "로컬 검증 세션은 사용 가능한 owner 멤버십이 정확히 1개일 때만 발급됩니다.",
+                    401,
+                )
+            row = rows[0]
+            ts = int(time.time())
+            _ = c.execute("DELETE FROM sessions WHERE expires_at<=?", (ts,))
+            token, csrf = secrets.token_urlsafe(48), secrets.token_urlsafe(32)
+            user_id = row_value(row, "id", str)
+            username = row_value(row, "username", str)
+            _ = c.execute(
+                "INSERT INTO sessions VALUES(?,?,?,?)",
+                (token_hash(token), user_id, csrf, ts + SESSION_SECONDS),
+            )
+            return token, Actor(user_id, username, csrf)
 
     def session(self, token: str | None) -> Actor:
         if not token or len(token) > 200:
