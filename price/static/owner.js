@@ -83,9 +83,15 @@ function renderHome(home, batches) {
   renderDocuments(home, batches);
   const questions = $('#owner-questions'); questions.replaceChildren();
   const pendingInstruments = home.pending_instrument_candidates || [];
+  const ownerAccount = (home.owner_actions || []).find(item => item.kind === 'confirm_owner_account');
   if (home.needs_company_confirmation || pendingInstruments.length) {
     const card = element('div', undefined, 'note');
     card.append(element('p', home.needs_company_confirmation ? '이 자료함의 회사와 회사 소유 계좌 정보를 확인해 주세요.' : '원본에서 계좌·카드 후보를 찾았습니다. 우리 회사 자료인 것만 선택해 주세요.'), button('회사 계좌·카드 확인', showOnboarding, 'primary'));
+    questions.append(card);
+  } else if (ownerAccount) {
+    const card = element('div', undefined, 'note');
+    card.append(element('p', ownerAccount.label));
+    if (home.company.role === 'owner') card.append(button('내 계좌 사실 확인', showOnboarding, 'primary'));
     questions.append(card);
   } else questions.append(element('p','현재 대표님께 추가로 요청한 회사 사실이 없습니다.'));
   for (const action of (home.owner_actions || []).filter(item => item.kind === 'confirm_document_context')) {
@@ -140,7 +146,7 @@ async function confirmDocumentContext(action) {
   const root = openDialog((action.filename || '자료') + ' · 계좌·통화 확인');
   root.append(element('p', '원본 파일과 읽은 칸은 바꾸지 않습니다. 회사 계좌는 이 문서의 후보일 뿐이며, 계좌에 저장된 통화가 원본 행의 통화를 채우지 않습니다.'));
   if (!action.candidates || !action.candidates.length) {
-    root.append(element('p', '먼저 가려지지 않은 회사 소유 계좌를 확인해 주세요. 계좌나 통화를 추정해 넣지 않습니다.'), button('회사 계좌 확인', showOnboarding, 'primary'));
+    root.append(element('p', '확인된 회사 계좌가 없습니다. 계좌나 통화를 추정해 넣지 않습니다. 먼저 대표가 아는 계좌 번호와 통화를 사실로 남겨 주세요.'), button('내 계좌 사실 확인', showOnboarding, 'primary'));
     return;
   }
   const form = document.createElement('form');
@@ -212,10 +218,49 @@ async function showOnboarding() {
     label.append(box, document.createTextNode((instrument.kind==='bank'?'계좌 ':'카드 ') + instrument.identifier + '는 우리 회사 자료입니다.'));
     form.append(label); checks.push({box,instrument});
   }
+  const confirmedBanks = (current.facts?.instruments || []).filter(item => item.kind === 'bank' && !/[*X]/.test(item.identifier));
+  const candidateBanks = (current.instrument_candidates || []).filter(item => item.kind === 'bank' && !/[*X]/.test(item.identifier));
+  let statedAccount = null;
+  let statedCurrency = null;
+  if (!confirmedBanks.length && !candidateBanks.length) {
+    form.append(element('p', '확인된 회사 계좌가 없습니다. 원본에 번호가 없어도 대표가 아는 계좌와 통화만 사실로 남깁니다. 문서 금액은 바꾸지 않고, 가려진 번호는 받지 않습니다.', 'note'));
+    statedAccount = field('우리 회사 계좌번호', 'owner_account', '', false);
+    statedAccount.id = 'owner-account-identifier';
+    statedAccount.maxLength = 40;
+    statedAccount.autocomplete = 'off';
+    statedAccount.placeholder = '가려지지 않은 계좌 번호';
+    statedCurrency = field('그 계좌의 통화', 'owner_currency', '', false);
+    statedCurrency.id = 'owner-account-currency';
+    statedCurrency.maxLength = 3;
+    statedCurrency.autocomplete = 'off';
+    statedCurrency.placeholder = '예: KRW';
+  }
   const confirmation = element('label',undefined,'check'), agree = document.createElement('input'); agree.type='checkbox'; agree.required=true; agree.name='confirmed';
   confirmation.append(agree, document.createTextNode('위 내용이 회사의 실제 정보임을 확인했습니다.')); form.append(confirmation);
   const submit = element('button','확인한 사실 저장','primary'); submit.type='submit'; form.append(submit);
-  form.addEventListener('submit', async event => { event.preventDefault(); submit.disabled=true; try { const saved = await post('/owner/onboarding',{expected_revision:current.revision,name:name.value,business_number:number.value,mode:current.mode,source_document_id:candidate?.source_document_id||null,instruments:checks.filter(x=>x.box.checked).map(x=>({kind:x.instrument.kind,identifier:x.instrument.identifier,currency:x.instrument.currency||null})),confirmed:agree.checked}); $('#owner-dialog').close(); state.caseworkResumeFor=''; await refresh(); if (saved.casework_resume && saved.casework_resume.state !== 'ready') showError(new Error(saved.casework_resume.message || '바뀐 자료의 거래 연결을 다시 확인하지 못했습니다.')); else toast('회사 사실을 저장했습니다.'); } catch(error){$('#owner-dialog-error').textContent=error.message;} finally{submit.disabled=false;} });
+  form.addEventListener('submit', async event => {
+    event.preventDefault();
+    submit.disabled = true;
+    try {
+      const instruments = checks.filter(x => x.box.checked).map(x => ({kind: x.instrument.kind, identifier: x.instrument.identifier, currency: x.instrument.currency || null}));
+      const statedId = (statedAccount?.value || '').replace(/[ -]/g, '').toUpperCase();
+      const statedCur = (statedCurrency?.value || '').trim().toUpperCase();
+      if (statedId || statedCur) {
+        if (!/^[0-9]{6,40}$/.test(statedId) || !/^[A-Z]{3}$/.test(statedCur)) throw new Error('가려지지 않은 계좌 번호와 통화 3자리를 함께 확인해 주세요. 추정해 넣지 않습니다.');
+        instruments.push({kind: 'bank', identifier: statedId, currency: statedCur});
+      }
+      const saved = await post('/owner/onboarding', {expected_revision: current.revision, name: name.value, business_number: number.value, mode: current.mode, source_document_id: candidate?.source_document_id || null, instruments, confirmed: agree.checked});
+      $('#owner-dialog').close();
+      state.caseworkResumeFor = '';
+      await refresh();
+      if (saved.casework_resume && saved.casework_resume.state !== 'ready') showError(new Error(saved.casework_resume.message || '바뀐 자료의 거래 연결을 다시 확인하지 못했습니다.'));
+      else toast('회사 사실을 저장했습니다.');
+    } catch (error) {
+      $('#owner-dialog-error').textContent = error.message;
+    } finally {
+      submit.disabled = false;
+    }
+  });
   root.append(form);
 }
 async function sha256(buffer) { if (!crypto.subtle) throw new Error('안전한 파일 해시 기능을 사용할 수 있는 브라우저가 필요합니다.'); const hash = await crypto.subtle.digest('SHA-256', buffer); return Array.from(new Uint8Array(hash), n=>n.toString(16).padStart(2,'0')).join(''); }

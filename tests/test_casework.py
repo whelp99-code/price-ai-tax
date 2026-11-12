@@ -392,3 +392,111 @@ def test_removing_confirmed_instrument_invalidates_document_context(w):
     with w.db.connect() as c:
         assert w.db.list(c, w.company, 'document_source_context')[0]['active'] is False
         assert not w.db.list(c, w.company, 'journal')
+
+def test_first_use_without_confirmed_account_reaches_existing_questions(w):
+    screen = open('price/static/owner.js', encoding='utf-8').read()
+    assert 'owner-account-identifier' in screen and 'owner-account-currency' in screen
+    assert 'confirm_owner_account' in screen and '계좌나 통화를 추정해 넣지 않습니다' in screen
+    assert 'currency: currency.value.trim().toUpperCase()' in screen
+    reader = Ingestion(w.svc)
+    owner = OwnerView(w.svc, reader.uploads)
+    named = owner.confirm(w.owner, w.company, CompanyFactsInput(
+        expected_revision=0, name='시험 회사 A', business_number='2222222222', mode='company', confirmed=True, instruments=[]))
+    assert named['instruments'] == []
+    _reader, document = read_document(w, BARE, 'first-use-bare')
+    home = owner.home(w.owner, w.company)
+    assert home['pending_instrument_candidates'] == [] and home['accounting_complete'] is False
+    assert any(item['kind'] == 'confirm_owner_account' for item in home['owner_actions'])
+    action = next(item for item in home['owner_actions'] if item['kind'] == 'confirm_document_context')
+    assert action['candidates'] == [] and action['document_id'] == document['id']
+    work = Casework(w.svc)
+    work.refresh(w.owner, w.company)
+    before = work.list(w.owner, w.company)[0]
+    assert before['questions'] == [] and before['accounting_complete'] is False
+    assert 'CURRENCY_UNCONFIRMED' in before['issues'] and 'OWNERSHIP_UNCONFIRMED' in before['issues']
+    for actor in (w.viewer, w.other_owner):
+        with pytest.raises(DomainError) as error:
+            owner.confirm(actor, w.company, CompanyFactsInput(
+                expected_revision=named['revision'], name='시험 회사 A', business_number='2222222222', mode='company', confirmed=True,
+                instruments=[{'kind': 'bank', 'identifier': '123456789012', 'currency': 'KRW'}]))
+        assert error.value.code in ('FORBIDDEN', 'NOT_FOUND')
+    with pytest.raises(DomainError) as error:
+        confirm_context(w, reader, document, identifier='1234****9012', key='first-use-masked')
+    assert error.value.code == 'DOCUMENT_CONTEXT_MASKED'
+    owner.confirm(w.other_owner, w.other_company, CompanyFactsInput(
+        expected_revision=0, name='시험 회사 B', business_number='3333333333', mode='company', confirmed=True,
+        instruments=[{'kind': 'bank', 'identifier': '999888777666', 'currency': 'KRW'}]))
+    with pytest.raises(DomainError) as error:
+        owner.confirm(w.owner, w.company, CompanyFactsInput(
+            expected_revision=named['revision'], name='시험 회사 A', business_number='2222222222', mode='company', confirmed=True,
+            instruments=[{'kind': 'bank', 'identifier': '999888777666', 'currency': 'KRW'}]))
+    assert error.value.code == 'COMPANY_INSTRUMENT_CONFLICT'
+    saved = owner.confirm(w.owner, w.company, CompanyFactsInput(
+        expected_revision=named['revision'], name='시험 회사 A', business_number='2222222222', mode='company', confirmed=True,
+        instruments=[{'kind': 'bank', 'identifier': '123456789012', 'currency': 'KRW'}]))
+    assert saved['instruments'] == [{'kind': 'bank', 'identifier': '123456789012', 'currency': 'KRW'}]
+    assert saved['verification'] == 'owner_factual_statement'
+    rows = reader.records(w.owner, w.company, document['id'])['rows']
+    assert rows[0]['values']['account'] is None and rows[0]['values']['currency'] is None
+    with w.db.connect() as c:
+        assert not w.db.list(c, w.company, 'document_source_context')
+        assert not w.db.list(c, w.company, 'journal')
+        assert c.execute('SELECT content FROM blobs WHERE company_id=? AND sha256=?', (w.company, document['sha256'])).fetchone()['content'] == BARE
+    held = work.list(w.owner, w.company)[0]
+    assert held['questions'] == [] and held['accounting_complete'] is False
+    home = owner.home(w.owner, w.company)
+    assert all(item['kind'] != 'confirm_owner_account' for item in home['owner_actions'])
+    action = next(item for item in home['owner_actions'] if item['kind'] == 'confirm_document_context')
+    assert action['candidates'][0]['identifier'] == '123456789012' and action['candidates'][0]['currency'] is None
+    assert action['candidates'][0]['instrument_currency_applied'] is False
+    document = reader.uploads.document(w.owner, w.company, document['id'])
+    with pytest.raises(DomainError) as error:
+        confirm_context(w, reader, document, identifier='555555555555', key='first-use-other-account')
+    assert error.value.code == 'DOCUMENT_CONTEXT_NOT_CANDIDATE'
+    with pytest.raises(DomainError) as error:
+        confirm_context(w, reader, document, key='first-use-stale-hash', source_hash='a' * 64)
+    assert error.value.code == 'STALE_SOURCE'
+    confirmed = confirm_context(w, reader, document, key='first-use-doc')
+    assert confirmed['applied_to_original'] is False and confirmed['instrument_currency_applied'] is False
+    assert confirmed['casework_resume']['state'] == 'ready'
+    event = work.list(w.owner, w.company)[0]
+    assert event['questions'][0]['key'] == 'cash_reason' and event['issues'] == []
+    assert event['values']['account'] == '123456789012' and event['values']['currency'] == 'KRW'
+    assert event['accounting_complete'] is False
+    rows = reader.records(w.owner, w.company, document['id'])['rows']
+    assert rows[0]['values']['account'] is None and rows[0]['values']['currency'] is None
+    _reader, other = read_document(w, OTHER_ACCOUNT, 'first-use-other-source')
+    assert other['state'] == 'COMPANY_REVIEW'
+    with pytest.raises(DomainError) as error:
+        confirm_context(w, reader, other, key='first-use-other-source')
+    assert error.value.code == 'READER_NOT_READY'
+    with w.db.connect() as c:
+        assert not w.db.list(c, w.company, 'journal')
+        assert c.execute('SELECT content FROM blobs WHERE company_id=? AND sha256=?', (w.company, document['sha256'])).fetchone()['content'] == BARE
+
+
+def test_first_use_later_krw_still_rejects_fraction_before_questions(w):
+    reader = Ingestion(w.svc)
+    owner = OwnerView(w.svc, reader.uploads)
+    named = owner.confirm(w.owner, w.company, CompanyFactsInput(
+        expected_revision=0, name='시험 회사 A', business_number='2222222222', mode='company', confirmed=True, instruments=[]))
+    _reader, document = read_document(w, FRACTION_BARE, 'first-use-fraction')
+    owner.confirm(w.owner, w.company, CompanyFactsInput(
+        expected_revision=named['revision'], name='시험 회사 A', business_number='2222222222', mode='company', confirmed=True,
+        instruments=[{'kind': 'bank', 'identifier': '123456789012', 'currency': 'KRW'}]))
+    work = Casework(w.svc)
+    work.refresh(w.owner, w.company)
+    assert work.list(w.owner, w.company)[0]['questions'] == []
+    document = reader.uploads.document(w.owner, w.company, document['id'])
+    with pytest.raises(DomainError) as error:
+        confirm_context(w, reader, document, key='first-use-fraction-krw')
+    assert error.value.code == 'KRW_FRACTION_REVIEW'
+    event = work.list(w.owner, w.company)[0]
+    assert event['questions'] == [] and event['values']['gross'] == '1.25' and event['values']['currency'] is None
+    assert event['accounting_complete'] is False
+    rows = reader.records(w.owner, w.company, document['id'])['rows']
+    assert rows[0]['values']['gross'] == '1.25' and rows[0]['values']['currency'] is None
+    with w.db.connect() as c:
+        assert not w.db.list(c, w.company, 'document_source_context')
+        assert not w.db.list(c, w.company, 'journal')
+        assert c.execute('SELECT content FROM blobs WHERE company_id=? AND sha256=?', (w.company, document['sha256'])).fetchone()['content'] == FRACTION_BARE

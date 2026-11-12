@@ -113,6 +113,16 @@ class OwnerView:
             if data.source_document_id:
                 if not c.execute('SELECT 1 FROM upload_documents WHERE company_id=? AND id=?', (company, data.source_document_id)).fetchone():
                     raise DomainError('NOT_FOUND', '현재 회사의 원본 자료가 아닙니다.', 404)
+            from .source_identity import masked_identifier, normalize_identifier
+            foreign = set()
+            for row in c.execute("SELECT body FROM objects WHERE kind='company_facts' AND company_id<>?", (company,)):
+                body = json.loads(row['body'])
+                for inst in body.get('instruments') or []:
+                    if inst.get('kind') == 'bank' and not masked_identifier(inst.get('identifier')):
+                        foreign.add(normalize_identifier(inst.get('identifier')))
+            for item in data.instruments:
+                if item.kind == 'bank' and item.identifier in foreign:
+                    raise DomainError('COMPANY_INSTRUMENT_CONFLICT', '다른 작업공간에서 확인한 계좌입니다. 이 회사의 계좌로 추정하지 않습니다.')
             values = data.model_dump(exclude={'expected_revision', 'confirmed'})
             values.update(business_number=number, confirmed_by=actor.id, verification='owner_factual_statement', legal_registry_verified=False)
             result = self.db.replace(c, company, 'company_facts', current['id'], values, current['revision']) if current else self.db.create(c, company, 'company_facts', values)
@@ -305,6 +315,9 @@ class OwnerView:
             actions = [{'kind': 'confirm_company', 'label': '회사와 계좌 정보를 확인해 주세요.'}] if not facts else []
             if facts and pending_instruments:
                 actions.append({'kind': 'confirm_instruments', 'label': '원본에서 찾은 계좌·카드를 회사 소유인지 확인해 주세요.'})
+            from .source_identity import confirmed_bank_identifiers
+            if facts and not pending_instruments and not confirmed_bank_identifiers(current):
+                actions.append({'kind': 'confirm_owner_account', 'label': '확인된 회사 계좌가 없습니다. 대표가 아는 계좌 번호와 통화만 사실로 남겨 주세요.'})
             context_actions, context_details = self._context_actions(c, company)
             actions.extend(context_actions)
             for d in documents:
