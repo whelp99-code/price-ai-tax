@@ -19,6 +19,12 @@ NS_APPROVAL = "hometax-approval"
 NS_QUARANTINE = "notion-quarantine"
 KIND_QUARANTINE = "notion_quarantine"
 
+def _create_draft(draft: TransactionInput) -> TransactionInput:
+    """Blob rows require file bytes. Notion file refs are names, not stored bytes."""
+    if draft.evidence_ids and all(item.startswith("notion-file:") for item in draft.evidence_ids):
+        return draft.model_copy(update={"evidence_ids": []})
+    return draft
+
 
 def last_edited_time(row: Mapping[str, Any]) -> str:
     direct = row.get("lastEditedTime") or row.get("last_edited_time")
@@ -258,15 +264,17 @@ def apply_drafts(
             hold(item, "journal exists; draft not overwritten", edited, approval)
             continue
         if existing_id is None:
-            created = svc.create_transaction(actor, company, item.draft)
+            created = svc.create_transaction(actor, company, _create_draft(item.draft))
             if created["deduplicated"]:
                 raise RuntimeError("natural key missing from lookup but create deduplicated")
             inserted += 1
-            body_hash = digest(item.draft.model_dump(mode="json"))
-            if _stamp_provenance(db, company, created["id"], provenance):
+            if item.draft.evidence_ids:
+                _replace_draft(db, company, created["id"], item.draft, provenance, actor.id)
+                provenance_writes += 1
+            elif _stamp_provenance(db, company, created["id"], provenance):
                 provenance_writes += 1
             if approval:
-                _link_approval(db, company, approval, created["id"], body_hash)
+                _link_approval(db, company, approval, created["id"], digest(item.draft.model_dump(mode="json")))
             continue
         with db.connect() as c:
             current = db.get(c, company, "transaction", existing_id)

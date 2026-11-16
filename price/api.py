@@ -20,6 +20,7 @@ from .filing import Filings
 from .worker import Queue
 from . import __version__
 from .models import (LoginInput, UserInput, EvidenceInput, TransactionInput, FactsInput, JournalInput,
+                     EvidenceCandidateLinkInput, EvidenceLinkConfirmInput, EvidenceLinkUnlinkInput,
                      RevisionInput, ReverseInput, PeriodInput, CoverageInput, AllocationInput, AuthorityInput,
                      CalculationInput, FilingInput, SubmitInput, PaymentInput, ConsultInput, CSVInput)
 
@@ -48,6 +49,12 @@ class BodyLimit:
         await self.app(scope, replay, send)
 
 
+async def logout_without_json_body(request: Request) -> bool:
+    """Logout carries no payload. An empty body must not be rejected as non-JSON."""
+    if request.method != "POST" or request.url.path != "/api/logout":
+        return False
+    return (await request.body()).strip() in (b"", b"{}")
+
 def create_app(db_path: str | Path | None = None, advisor: Advisor | None = None) -> FastAPI:
     db = Database(db_path or os.getenv("PRICE_DB", ".data/price.sqlite3"))
     svc = Service(db, advisor)
@@ -56,7 +63,10 @@ def create_app(db_path: str | Path | None = None, advisor: Advisor | None = None
     app.state.db, app.state.service, app.state.filings, app.state.queue = db, svc, filing, queue
     app.add_middleware(BodyLimit)
     secure = os.getenv("PRICE_SECURE_COOKIE", "0") == "1"
-    allowed_hosts = {"localhost", "127.0.0.1", "::1", "testserver"} | {x.strip() for x in os.getenv("PRICE_ALLOWED_HOSTS", "").split(",") if x.strip()}
+    allowed_hosts = {"localhost", "127.0.0.1", "::1"}
+    if os.getenv("PRICE_ALLOW_TESTSERVER") == "1":
+        allowed_hosts.add("testserver")
+    allowed_hosts.update(part.strip() for part in os.getenv("PRICE_ALLOWED_HOSTS", "").split(",") if part.strip())
 
     @app.exception_handler(DomainError)
     async def domain_error(request, exc):
@@ -83,7 +93,8 @@ def create_app(db_path: str | Path | None = None, advisor: Advisor | None = None
             media_type = request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
             chunk_route = is_chunk_request(request.method, request.url.path)
             if request.url.path.startswith("/api/") and media_type != ("application/octet-stream" if chunk_route else "application/json"):
-                return JSONResponse({"code": "BINARY_REQUIRED" if chunk_route else "JSON_REQUIRED", "message": "파일 조각은 바이너리, 나머지 변경은 JSON 요청을 사용하세요."}, status_code=415)
+                if not await logout_without_json_body(request):
+                    return JSONResponse({"code": "BINARY_REQUIRED" if chunk_route else "JSON_REQUIRED", "message": "파일 조각은 바이너리, 나머지 변경은 JSON 요청을 사용하세요."}, status_code=415)
         response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
@@ -195,6 +206,17 @@ def create_app(db_path: str | Path | None = None, advisor: Advisor | None = None
     @app.post(prefix + "/transactions/{ident}/facts")
     def facts(company: str, ident: str, data: FactsInput, a: Actor = Depends(actor)): return svc.update_facts(a, company, ident, data)
 
+    @app.post(prefix + "/transactions/{ident}/evidence-links")
+    def link_evidence(company: str, ident: str, data: EvidenceCandidateLinkInput, a: Actor = Depends(actor)):
+        return svc.link_evidence_candidate(a, company, ident, data)
+
+    @app.post(prefix + "/transactions/{ident}/evidence-links/{evidence_id}/confirm")
+    def confirm_evidence(company: str, ident: str, evidence_id: str, data: EvidenceLinkConfirmInput, a: Actor = Depends(actor)):
+        return svc.confirm_evidence_link(a, company, ident, evidence_id, data)
+
+    @app.post(prefix + "/transactions/{ident}/evidence-links/{evidence_id}/unlink")
+    def unlink_evidence(company: str, ident: str, evidence_id: str, data: EvidenceLinkUnlinkInput, a: Actor = Depends(actor)):
+        return svc.unlink_evidence_candidate(a, company, ident, evidence_id, data)
     @app.post(prefix + "/transactions/{ident}/analyze")
     def analyze(company: str, ident: str, a: Actor = Depends(actor)): return svc.analyze(a, company, ident)
 
