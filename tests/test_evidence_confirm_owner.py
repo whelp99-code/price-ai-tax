@@ -1,7 +1,7 @@
 from pathlib import Path
 import base64
 from price.db import DomainError
-from price.models import EvidenceCandidateLinkInput, EvidenceLinkConfirmInput, EvidenceLinkRevokeInput
+from price.models import EvidenceCandidateLinkInput, EvidenceLinkConfirmInput
 import pytest
 
 
@@ -26,14 +26,6 @@ def test_only_owner_can_confirm_evidence_link(w):
     confirmed = w.svc.confirm_evidence_link(w.owner, w.company, tx["id"], extra["id"], payload)
     assert confirmed["evidence_links"][0]["status"] == "confirmed"
     assert extra["id"] in confirmed["evidence_ids"]
-    revoke = EvidenceLinkRevokeInput(expected_revision=confirmed["revision"], reason="정정")
-    for other in (w.preparer, w.reviewer):
-        with pytest.raises(DomainError) as refused:
-            w.svc.revoke_confirmed_evidence_link(other, w.company, tx["id"], extra["id"], revoke)
-        assert refused.value.status == 403
-    revoked = w.svc.revoke_confirmed_evidence_link(w.owner, w.company, tx["id"], extra["id"], revoke)
-    assert revoked["evidence_links"] == []
-    assert extra["id"] not in revoked["evidence_ids"]
 def test_transaction_detail_hides_confirm_controls_unless_owner():
     text = Path("price/static/app.js").read_text(encoding="utf-8")
     confirm = "role()==='owner'?`<form data-link-action=\"confirm\"><label>확정 사유"

@@ -116,10 +116,6 @@ class EvidenceLinkUnlinkInput(Input):
     reason: Text
 
 
-class EvidenceLinkRevokeInput(Input):
-    expected_revision: Annotated[StrictInt, Field(gt=0)]
-    reason: Text
-
 class PeriodInput(Input):
     label: Annotated[str, Field(min_length=1, max_length=120)]
     start: date

@@ -50,8 +50,11 @@ try {
   report.port = apiPort;
   const chromePort = await freePort();
   const url = `http://127.0.0.1:${apiPort}`;
-  const log = fs.openSync(path.join(temp, 'server.log'), 'w');
-  const server = spawn('python3', ['-m', 'price', '--db', db, 'serve', '--host', '127.0.0.1', '--port', String(apiPort)], {cwd: root, stdio: ['ignore', log, log]});
+  const serverLog = path.join(temp, 'server.log');
+  const log = fs.openSync(serverLog, 'w');
+  // Verbose imports with an empty bytecode cache make the server log name every source file it compiled.
+  const serverEnv = {...process.env, PYTHONVERBOSE: '1', PYTHONPYCACHEPREFIX: path.join(temp, 'pycache')};
+  const server = spawn('python3', ['-m', 'price', '--db', db, 'serve', '--host', '127.0.0.1', '--port', String(apiPort)], {cwd: root, env: serverEnv, stdio: ['ignore', log, log]});
   children.push(server);
   const wait = async (fn, label, ms = 15000) => {
     const end = Date.now() + ms;
@@ -66,6 +69,22 @@ try {
     if (server.exitCode !== null) throw new Error('API exited');
     return (await fetch(url + '/health')).ok;
   }, 'API health');
+  const loaded = [...new Set([...fs.readFileSync(serverLog, 'utf8').matchAll(/code object from '?([^'\s]+\.py)'?/g)].map(m => m[1]))]
+    .filter(file => file.startsWith(root + path.sep))
+    .map(file => {
+      const rel = path.relative(root, file);
+      const head = git(['rev-parse', 'HEAD:' + rel]);
+      const disk = git(['hash-object', file]);
+      return {file: rel, head_blob: head, disk_blob: disk, match: head === disk};
+    });
+  report.server_boot = {
+    pid: server.pid,
+    cmdline: fs.readFileSync(`/proc/${server.pid}/cmdline`, 'utf8').split('\0').filter(Boolean),
+    cwd: fs.readlinkSync(`/proc/${server.pid}/cwd`),
+    exe: fs.readlinkSync(`/proc/${server.pid}/exe`),
+    log: serverLog,
+    loaded,
+  };
   const chromeLog = fs.openSync(path.join(temp, 'chrome.log'), 'w');
   const chrome = spawn('/usr/bin/google-chrome-stable', ['--headless=new', '--disable-background-networking', '--disable-dev-shm-usage', '--no-first-run', '--no-default-browser-check', '--user-data-dir=' + path.join(temp, 'profile'), '--remote-debugging-address=127.0.0.1', '--remote-debugging-port=' + chromePort, 'about:blank'], {cwd: root, stdio: ['ignore', chromeLog, chromeLog]});
   children.push(chrome);
@@ -106,6 +125,7 @@ try {
     await cdp('Input.dispatchMouseEvent', {type: 'mouseReleased', ...rect, button: 'left', clickCount: 1});
   };
   const check = (name, value = true) => { if (!value) throw new Error(name); report.checks.push(name); };
+  check('server compiled price/api.py and price/service.py from this SHA', ['price/api.py', 'price/service.py'].every(rel => loaded.some(item => item.file === rel)) && loaded.every(item => item.match));
   await cdp('Runtime.enable');
   await cdp('Page.enable');
   await cdp('Emulation.setDeviceMetricsOverride', {width: 1440, height: 1100, deviceScaleFactor: 1, mobile: false});
