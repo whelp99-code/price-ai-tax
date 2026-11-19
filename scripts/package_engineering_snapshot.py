@@ -53,12 +53,13 @@ def main():
             if hashlib.sha256(archive.read(name)).hexdigest()!=expected:raise RuntimeError('Archive member hash mismatch')
         verification_root=Path(tempfile.mkdtemp(prefix='package-smoke-',dir=ROOT/'.data'))
         archive.extractall(verification_root)
-    code='''import json,sys
+    code='''import json,os,sys
 from pathlib import Path
 import price
 from price.db import Database
 from price.service import Service
 from price.demo import seed_demo
+os.environ["PRICE_ALLOW_TESTSERVER"] = "1"
 from price.api import create_app
 from fastapi.testclient import TestClient
 assert Path(price.__file__).resolve().is_relative_to(Path(sys.argv[1]).resolve())
