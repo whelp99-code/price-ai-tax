@@ -1,3 +1,5 @@
+import sys
+import types
 from datetime import date
 from pathlib import Path
 
@@ -81,6 +83,33 @@ def test_engine_exception_becomes_review_not_crash(monkeypatch):
     assert result["authoritative_value"] == 600_000
     assert result["external"]["status"] == K.BLOCKED_UNSUPPORTED
     assert result["external"]["reason"] == "ENGINE_EXCEPTION:ZeroDivisionError"
+
+
+def test_module_version_mismatch_blocks_before_engine(monkeypatch):
+    server = types.SimpleNamespace(vat_common_input_allocation=_refuse_engine)
+    fake = types.ModuleType("korean_tax_calc_mcp")
+    setattr(fake, "__version__", "0.12.1")
+    setattr(fake, "server", server)
+    monkeypatch.setitem(sys.modules, "korean_tax_calc_mcp", fake)
+    monkeypatch.setitem(sys.modules, "korean_tax_calc_mcp.server", server)
+    monkeypatch.setattr(K, "installed_version", lambda: K.PINNED_VERSION)
+    result = K.crosscheck_common_input(_common())
+    assert result["decision"] == K.REVIEW
+    assert result["authoritative_value"] == 600_000
+    assert result["external"]["status"] == K.BLOCKED_VERSION
+    assert result["external"]["reason"] == "module version 0.12.1 != 0.12.2"
+    assert result["external"]["value"] is None and result["external"]["raw"] is None
+
+
+def test_engine_import_failure_becomes_review_not_crash(monkeypatch):
+    monkeypatch.setitem(sys.modules, "korean_tax_calc_mcp", None)
+    monkeypatch.setattr(K, "installed_version", lambda: K.PINNED_VERSION)
+    result = K.crosscheck_common_input(_common())
+    assert result["decision"] == K.REVIEW
+    assert result["authoritative_value"] == 600_000
+    assert result["external"]["status"] == K.BLOCKED_UNSUPPORTED
+    assert result["external"]["reason"] == "ENGINE_EXCEPTION:ModuleNotFoundError"
+    assert result["external"]["value"] is None
 
 
 def test_mismatch_goes_to_review(monkeypatch):
