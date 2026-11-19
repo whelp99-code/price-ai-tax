@@ -40,7 +40,8 @@ print(json.dumps({'company': company, 'transaction': tx['id'], 'money': [tx['net
   return JSON.parse(execFileSync('python3', ['-c', code], {cwd: root, encoding: 'utf8'}));
 }
 
-const report = {status: 'FAIL', checks: [], port: 0, production_port_touched: false};
+const git = args => execFileSync('git', ['-C', root, ...args], {encoding: 'utf8'}).trim();
+const report = {status: 'FAIL', source_sha: git(['rev-parse', 'HEAD']), source_tree_clean: git(['status', '--porcelain', '--untracked-files=no']) === '', checks: [], port: 0, production_port_touched: false};
 try {
   const db = path.join(temp, 'price.sqlite3');
   const seeded = seed(db);

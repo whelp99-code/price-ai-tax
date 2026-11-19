@@ -20,7 +20,7 @@ from .filing import Filings
 from .worker import Queue
 from . import __version__
 from .models import (LoginInput, UserInput, EvidenceInput, TransactionInput, FactsInput, JournalInput,
-                     EvidenceCandidateLinkInput, EvidenceLinkConfirmInput, EvidenceLinkUnlinkInput,
+                     EvidenceCandidateLinkInput, EvidenceLinkConfirmInput, EvidenceLinkUnlinkInput, EvidenceLinkRevokeInput,
                      RevisionInput, ReverseInput, PeriodInput, CoverageInput, AllocationInput, AuthorityInput,
                      CalculationInput, FilingInput, SubmitInput, PaymentInput, ConsultInput, CSVInput)
 
@@ -217,6 +217,10 @@ def create_app(db_path: str | Path | None = None, advisor: Advisor | None = None
     @app.post(prefix + "/transactions/{ident}/evidence-links/{evidence_id}/unlink")
     def unlink_evidence(company: str, ident: str, evidence_id: str, data: EvidenceLinkUnlinkInput, a: Actor = Depends(actor)):
         return svc.unlink_evidence_candidate(a, company, ident, evidence_id, data)
+
+    @app.post(prefix + "/transactions/{ident}/evidence-links/{evidence_id}/revoke")
+    def revoke_evidence(company: str, ident: str, evidence_id: str, data: EvidenceLinkRevokeInput, a: Actor = Depends(actor)):
+        return svc.revoke_confirmed_evidence_link(a, company, ident, evidence_id, data)
     @app.post(prefix + "/transactions/{ident}/analyze")
     def analyze(company: str, ident: str, a: Actor = Depends(actor)): return svc.analyze(a, company, ident)
 

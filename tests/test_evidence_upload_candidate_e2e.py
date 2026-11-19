@@ -122,6 +122,13 @@ def test_candidate_link_reread_unlink(dev_price):
     assert body["evidence_ids"] == []
     assert client.get(prefix + "/journals").json() == []
 
+    for empty in ({}, {"reason": ""}, {"reason": "   "}):
+        refused = client.post(prefix + f"/transactions/{created['id']}/evidence-links/{evidence_id}/unlink", json={
+            "expected_revision": body["revision"], **empty,
+        })
+        assert refused.status_code == 422, refused.text
+    assert client.get(prefix + f"/transactions/{created['id']}").json() == body
+
     unlinked = client.post(prefix + f"/transactions/{created['id']}/evidence-links/{evidence_id}/unlink", json={
         "expected_revision": body["revision"], "reason": "후보 해제",
     })
@@ -160,8 +167,30 @@ def test_facts_update_keeps_evidence_links_consistent(dev_price):
     assert candidate.status_code == 200, candidate.text
     assert candidate.json()["evidence_ids"] == [confirmed_id]
 
+    before = client.get(prefix + tx).json()
+    blocked = client.post(prefix + tx + "/facts", json={
+        "expected_revision": before["revision"], "business_purpose": "증빙을 사실 수정으로 교체",
+        "tax_category": "standard", "evidence_ids": [candidate_id], "reason": "증빙 교체",
+    })
+    assert blocked.status_code == 409, blocked.text
+    assert blocked.json()["code"] == "CONFIRMED_EVIDENCE_PROTECTED"
+    assert client.get(prefix + tx).json() == before
+
+    empty = client.post(prefix + tx + f"/evidence-links/{confirmed_id}/revoke", json={
+        "expected_revision": before["revision"], "reason": "  ",
+    })
+    assert empty.status_code == 422, empty.text
+    revoked = client.post(prefix + tx + f"/evidence-links/{confirmed_id}/revoke", json={
+        "expected_revision": before["revision"], "reason": "대표 정정: 잘못 확정",
+    })
+    assert revoked.status_code == 200, revoked.text
+    assert revoked.json()["evidence_ids"] == []
+    assert revoked.json()["evidence_links"] == [{"evidence_id": candidate_id, "status": "candidate", "reason": "남은 후보"}]
+    assert (revoked.json()["net"], revoked.json()["tax"], revoked.json()["gross"]) == (1000, 100, 1100)
+    assert client.get(prefix + "/journals").json() == []
+
     updated = client.post(prefix + tx + "/facts", json={
-        "expected_revision": candidate.json()["revision"], "business_purpose": "증빙을 사실 수정으로 교체",
+        "expected_revision": revoked.json()["revision"], "business_purpose": "증빙을 사실 수정으로 교체",
         "tax_category": "standard", "evidence_ids": [candidate_id], "reason": "증빙 교체",
     })
     assert updated.status_code == 200, updated.text
@@ -171,9 +200,10 @@ def test_facts_update_keeps_evidence_links_consistent(dev_price):
     assert reread["evidence_links"] == []
     assert (reread["net"], reread["tax"], reread["gross"]) == (1000, 100, 1100)
     events = client.get(prefix + "/audit").json()["events"]
+    revoke_event = next(e for e in events if e["action"] == "transaction.evidence_link_revoked")
+    assert json.loads(revoke_event["detail"]) == {"evidence_id": confirmed_id, "status": "confirmed", "reason": "대표 정정: 잘못 확정"}
     facts_event = next(e for e in events if e["action"] == "transaction.facts_updated")
     assert json.loads(facts_event["detail"])["evidence_links_dropped"] == [
-        {"evidence_id": confirmed_id, "status": "confirmed"},
         {"evidence_id": candidate_id, "status": "candidate"},
     ]
 
@@ -199,7 +229,7 @@ def test_confirm_is_separate_and_does_not_change_books(dev_price):
     assert {key: confirmed.json()[key] for key in money} == money
     assert client.get(prefix + "/journals").json() == []
     blocked = client.post(prefix + f"/transactions/{created['id']}/evidence-links/{evidence_id}/unlink", json={
-        "expected_revision": confirmed.json()["revision"],
+        "expected_revision": confirmed.json()["revision"], "reason": "확정된 것을 후보 해제로 빼려 함",
     })
     assert blocked.status_code == 409
     assert blocked.json()["code"] == "EVIDENCE_LINK_NOT_CANDIDATE"
