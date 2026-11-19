@@ -46,16 +46,17 @@ async function transactionForm(tx=null){const ev=state.cache.evidence||await get
 async function showTransactionEvidence(id){
   if(!state.cache.evidence)state.cache.evidence=await get('/evidence');
   const tx=await get('/transactions/'+encodeURIComponent(id));
+  const history=await get('/transactions/'+encodeURIComponent(id)+'/history');
   const links=Array.isArray(tx.evidence_links)?tx.evidence_links:[];
   const taken=new Set(links.map(item=>item.evidence_id));
   const open=(state.cache.evidence||[]).filter(item=>!taken.has(item.id));
   const label=evidenceId=>{const row=(state.cache.evidence||[]).find(item=>item.id===evidenceId);return row?row.filename:evidenceId;};
   const mark=status=>status==='confirmed'?'<span class="badge good">확정</span>':'<span class="badge warn">후보</span>';
-  const group=status=>links.filter(item=>item.status===status).map(item=>`<li data-evidence-status="${esc(item.status)}" data-evidence-id="${esc(item.evidence_id)}"><div>${mark(item.status)} <strong>${esc(label(item.evidence_id))}</strong><p>${esc(item.reason||'')}</p>${item.confirm_reason?`<p>확정 사유: ${esc(item.confirm_reason)}</p>`:''}</div>${item.status==='candidate'&&writable()?`<button type="button" class="small secondary" data-link-action="unlink">후보 해제</button>`:''}${item.status==='candidate'&&role()==='owner'?`<form data-link-action="confirm"><label>확정 사유<textarea name="reason" required></textarea></label><button class="primary" type="submit" disabled>확정</button></form>`:''}</li>`).join('');
-  modal('거래 상세 · 증빙 연결',`<section id="evidence-link-panel" data-tx="${esc(tx.id)}" data-revision="${tx.revision}"><p>${esc(tx.counterparty)} · ${esc(tx.event_date)} · ${money(tx.gross)}원</p><h3>후보</h3>${group('candidate')?`<ul class="evidence-links">${group('candidate')}</ul>`:'<p class="empty" data-empty="candidate">연결된 후보가 없습니다.</p>'}<h3>확정</h3>${group('confirmed')?`<ul class="evidence-links">${group('confirmed')}</ul>`:'<p class="empty" data-empty="confirmed">확정된 증빙이 없습니다.</p>'}${writable()?`<form data-link-action="link"><label>증빙<select name="evidence_id" required>${open.map(item=>`<option value="${esc(item.id)}">${esc(item.filename)}</option>`).join('')||'<option value="">연결할 증빙이 없습니다</option>'}</select></label><label>후보 연결 사유<textarea name="reason" required></textarea></label><button class="primary" type="submit" ${open.length?'':'disabled'}>후보 연결</button></form>`:'<p>조회 권한으로는 연결을 바꿀 수 없습니다.</p>'}</section>`);
+  const group=status=>links.filter(item=>item.status===status).map(item=>`<li data-evidence-status="${esc(item.status)}" data-evidence-id="${esc(item.evidence_id)}"><div>${mark(item.status)} <strong>${esc(label(item.evidence_id))}</strong><p>${esc(item.reason||'')}</p>${item.confirm_reason?`<p>확정 사유: ${esc(item.confirm_reason)}</p>`:''}</div>${item.status==='candidate'&&writable()?`<form data-link-action="unlink"><label>해제 사유<textarea name="reason" required></textarea></label><button class="small secondary" type="submit" disabled>후보 해제</button></form>`:''}${item.status==='candidate'&&role()==='owner'?`<form data-link-action="confirm"><label>확정 사유<textarea name="reason" required></textarea></label><button class="primary" type="submit" disabled>확정</button></form>`:''}</li>`).join('');
+  modal('거래 원본·변경 이력 · 증빙 연결',`<section id="tx-history">${detail(tx,'현재 거래')}${detail(history,'이전 사실 이력')}</section><section id="evidence-link-panel" data-tx="${esc(tx.id)}" data-revision="${tx.revision}"><p>${esc(tx.counterparty)} · ${esc(tx.event_date)} · ${money(tx.gross)}원</p><h3>후보</h3>${group('candidate')?`<ul class="evidence-links">${group('candidate')}</ul>`:'<p class="empty" data-empty="candidate">연결된 후보가 없습니다.</p>'}<h3>확정</h3>${group('confirmed')?`<ul class="evidence-links">${group('confirmed')}</ul>`:'<p class="empty" data-empty="confirmed">확정된 증빙이 없습니다.</p>'}${writable()?`<form data-link-action="link"><label>증빙<select name="evidence_id" required>${open.map(item=>`<option value="${esc(item.id)}">${esc(item.filename)}</option>`).join('')||'<option value="">연결할 증빙이 없습니다</option>'}</select></label><label>후보 연결 사유<textarea name="reason" required></textarea></label><button class="primary" type="submit" ${open.length?'':'disabled'}>후보 연결</button></form>`:'<p>조회 권한으로는 연결을 바꿀 수 없습니다.</p>'}</section>`);
   const panel=$('#evidence-link-panel');
   panel.addEventListener('input',event=>{
-    const form=event.target.closest('form[data-link-action="confirm"]');
+    const form=event.target.closest('form[data-link-action="confirm"],form[data-link-action="unlink"]');
     if(!form)return;
     form.querySelector('button[type="submit"]').disabled=!(form.reason.value||'').trim();
   });
@@ -67,15 +68,8 @@ async function showTransactionEvidence(id){
     const evidenceId=form.dataset.linkAction==='link'?form.evidence_id.value:form.closest('[data-evidence-id]').dataset.evidenceId;
     try{
       if(form.dataset.linkAction==='link')await post('/transactions/'+encodeURIComponent(id)+'/evidence-links',{expected_revision:Number(panel.dataset.revision),evidence_id:evidenceId,reason});
+      else if(form.dataset.linkAction==='unlink')await post('/transactions/'+encodeURIComponent(id)+'/evidence-links/'+encodeURIComponent(evidenceId)+'/unlink',{expected_revision:Number(panel.dataset.revision),reason});
       else await post('/transactions/'+encodeURIComponent(id)+'/evidence-links/'+encodeURIComponent(evidenceId)+'/confirm',{expected_revision:Number(panel.dataset.revision),reason});
-      await showTransactionEvidence(id);
-    }catch(err){fail(err);}
-  });
-  panel.addEventListener('click',async event=>{
-    const button=event.target.closest('[data-link-action="unlink"]');
-    if(!button)return;
-    try{
-      await post('/transactions/'+encodeURIComponent(id)+'/evidence-links/'+encodeURIComponent(button.closest('[data-evidence-id]').dataset.evidenceId)+'/unlink',{expected_revision:Number(panel.dataset.revision),reason:'화면에서 후보 해제'});
       await showTransactionEvidence(id);
     }catch(err){fail(err);}
   });

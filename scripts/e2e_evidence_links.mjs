@@ -133,13 +133,19 @@ try {
   const image = await cdp('Page.captureScreenshot', {format: 'png', captureBeyondViewport: false});
   fs.writeFileSync(shot, Buffer.from(image.data, 'base64'));
   report.screenshot = shot;
-  await click('[data-evidence-status="candidate"] [data-link-action="unlink"]');
+  check('history restored next to evidence panel', await evaluate(`document.querySelectorAll('#tx-history details').length===2`));
+  check('empty unlink reason disables the button', await evaluate(`document.querySelector('[data-evidence-status="candidate"] form[data-link-action="unlink"] button[type="submit"]').disabled===true`));
+  await evaluate(`(()=>{const form=document.querySelector('[data-evidence-status="candidate"] form[data-link-action="unlink"]');form.reason.value='화면에서 입력한 해제 사유';form.reason.dispatchEvent(new Event('input',{bubbles:true}));})()`);
+  await click('[data-evidence-status="candidate"] form[data-link-action="unlink"] button[type="submit"]');
   await wait(() => evaluate('!document.querySelector("[data-evidence-status=candidate]") && !!document.querySelector("[data-evidence-status=confirmed]")'), 'candidate unlinked');
   const after = await evaluate(`fetch('/api/companies/${seeded.company}/transactions/${seeded.transaction}',{credentials:'same-origin'}).then(r=>r.json())`);
   const journals = await evaluate(`fetch('/api/companies/${seeded.company}/journals',{credentials:'same-origin'}).then(r=>r.json())`);
   check('reread keeps confirmed only', after.evidence_links.length === 1 && after.evidence_links[0].status === 'confirmed' && after.evidence_links[0].confirm_reason === '화면에서 별도 확정');
   check('amounts unchanged', after.net === 1000 && after.tax === 100 && after.gross === 1100);
   check('no journal created', Array.isArray(journals) && journals.length === 0);
+  const audit = await evaluate(`fetch('/api/companies/${seeded.company}/audit',{credentials:'same-origin'}).then(r=>r.json())`);
+  const unlinkEvent = audit.events.find(event => event.action === 'transaction.evidence_candidate_unlinked');
+  check('unlink reason kept in audit', !!unlinkEvent && JSON.parse(unlinkEvent.detail).reason === '화면에서 입력한 해제 사유');
   report.status = 'PASS';
   ws.close();
 } catch (error) {

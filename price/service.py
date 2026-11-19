@@ -191,9 +191,19 @@ class Service:
             values.update(data.model_dump(exclude={"expected_revision", "reason"}))
             TransactionInput.model_validate({k: values[k] for k in TransactionInput.model_fields})
             self._evidence_check(c, company, values["evidence_ids"])
+            attached = set(values["evidence_ids"])
+            links, dropped = [], []
+            for item in values.get("evidence_links") or []:
+                stale = (item["status"] == "confirmed") != (item["evidence_id"] in attached)
+                (dropped if stale else links).append(item)
+            if dropped:
+                values["evidence_links"] = links
             changed = self.db.replace(c, company, "transaction", ident, values, data.expected_revision)
             self._supersede(c, company, ident)
-            self.db.audit(c, company, actor.id, "transaction.facts_updated", ident, {"revision": changed["revision"], "reason": data.reason})
+            detail: dict[str, object] = {"revision": changed["revision"], "reason": data.reason}
+            if dropped:
+                detail["evidence_links_dropped"] = [{"evidence_id": x["evidence_id"], "status": x["status"]} for x in dropped]
+            self.db.audit(c, company, actor.id, "transaction.facts_updated", ident, detail)
             return changed
     def _journal_snapshot(self, c, company):
         return [(row["id"], row["revision"], row["body"]) for row in c.execute(
@@ -262,7 +272,7 @@ class Service:
                 raise DomainError("EVIDENCE_LINK_NOT_CANDIDATE", "후보 연결만 해제할 수 있습니다.")
             links = [item for item in links if item["evidence_id"] != evidence_id]
             changed = self._replace_evidence_link(c, company, ident, rec, links, data.expected_revision)
-            self.db.audit(c, company, actor.id, "transaction.evidence_candidate_unlinked", ident, {"evidence_id": evidence_id})
+            self.db.audit(c, company, actor.id, "transaction.evidence_candidate_unlinked", ident, {"evidence_id": evidence_id, "reason": data.reason})
             return changed
 
     def _new_journal(self, c, actor, company, data: dict, *, transaction=None, reversal_of=None):

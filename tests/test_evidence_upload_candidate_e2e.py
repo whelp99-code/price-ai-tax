@@ -6,6 +6,7 @@ production listener on 4382 and does not post a journal.
 from __future__ import annotations
 
 import base64
+import json
 import socket
 import subprocess
 import sys
@@ -80,8 +81,8 @@ def dev_price():
                     process.wait(timeout=10)
 
 
-def _upload(client, prefix, name):
-    uploaded = client.post(prefix + "/evidence", json={"filename": name, "content_base64": base64.b64encode(RAW).decode()})
+def _upload(client, prefix, name, raw=RAW):
+    uploaded = client.post(prefix + "/evidence", json={"filename": name, "content_base64": base64.b64encode(raw).decode()})
     assert uploaded.status_code == 201, uploaded.text
     return uploaded.json()["id"]
 
@@ -133,6 +134,48 @@ def test_candidate_link_reread_unlink(dev_price):
     assert after.json()["evidence_links"] == []
     assert after.json()["evidence_ids"] == []
     assert client.get(prefix + "/journals").json() == []
+    events = client.get(prefix + "/audit").json()["events"]
+    unlink_event = next(e for e in events if e["action"] == "transaction.evidence_candidate_unlinked")
+    assert json.loads(unlink_event["detail"]) == {"evidence_id": evidence_id, "reason": "후보 해제"}
+
+
+def test_facts_update_keeps_evidence_links_consistent(dev_price):
+    client, prefix = dev_price
+    confirmed_id = _upload(client, prefix, "confirmed-evidence.txt")
+    candidate_id = _upload(client, prefix, "candidate-evidence.txt", RAW + b"second\n")
+    assert candidate_id != confirmed_id
+    created = _draft(client, prefix, "evidence-facts-sync-1")
+    tx = f"/transactions/{created['id']}"
+    linked = client.post(prefix + tx + "/evidence-links", json={
+        "expected_revision": created["revision"], "evidence_id": confirmed_id, "reason": "확정할 후보",
+    })
+    assert linked.status_code == 200, linked.text
+    confirmed = client.post(prefix + tx + f"/evidence-links/{confirmed_id}/confirm", json={
+        "expected_revision": linked.json()["revision"], "reason": "대표 확정",
+    })
+    assert confirmed.status_code == 200, confirmed.text
+    candidate = client.post(prefix + tx + "/evidence-links", json={
+        "expected_revision": confirmed.json()["revision"], "evidence_id": candidate_id, "reason": "남은 후보",
+    })
+    assert candidate.status_code == 200, candidate.text
+    assert candidate.json()["evidence_ids"] == [confirmed_id]
+
+    updated = client.post(prefix + tx + "/facts", json={
+        "expected_revision": candidate.json()["revision"], "business_purpose": "증빙을 사실 수정으로 교체",
+        "tax_category": "standard", "evidence_ids": [candidate_id], "reason": "증빙 교체",
+    })
+    assert updated.status_code == 200, updated.text
+
+    reread = client.get(prefix + tx).json()
+    assert reread["evidence_ids"] == [candidate_id]
+    assert reread["evidence_links"] == []
+    assert (reread["net"], reread["tax"], reread["gross"]) == (1000, 100, 1100)
+    events = client.get(prefix + "/audit").json()["events"]
+    facts_event = next(e for e in events if e["action"] == "transaction.facts_updated")
+    assert json.loads(facts_event["detail"])["evidence_links_dropped"] == [
+        {"evidence_id": confirmed_id, "status": "confirmed"},
+        {"evidence_id": candidate_id, "status": "candidate"},
+    ]
 
 
 def test_confirm_is_separate_and_does_not_change_books(dev_price):
