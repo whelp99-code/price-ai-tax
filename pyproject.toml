@@ -11,6 +11,9 @@ dependencies = ["fastapi==0.141.1", "uvicorn==0.52.4", "pydantic==2.13.5", "http
 
 [project.optional-dependencies]
 test = ["pytest==8.4.2", "pytest-asyncio==1.4.0"]
+# starlette 1.x TestClient subclasses httpx2 when that package is installed.
+# korean-tax-calc-mcp pulls httpx2, and this repo's HTTP tests require httpx.Client.
+external-calc = ["korean-tax-calc-mcp==0.12.2", "starlette==0.52.1"]
 
 [project.scripts]
 price = "price.cli:main"
