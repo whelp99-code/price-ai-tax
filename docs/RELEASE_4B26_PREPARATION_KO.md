@@ -4,8 +4,8 @@
 
 ## 대상과 이전 방식
 
-- 대상 소스: `4b2623a22488d7038e5c132ce87a398a3f5045c8`
-- 현재 운영 소스 및 이번 전환의 롤백 대상: `7469d467d41c5f78a29d8093e0588e34e89896e4`
+- 대상 소스: `f8b0b3192ce3dbc4f63eff7cf333dd0fa39f7d4a`
+- 현재 운영 소스 및 이번 전환의 롤백 대상: `9abb308e3d9358b6f733c799ac30f88b1119fe1a`
 - 릴리스 루트: `/home/jm/.local/share/price/releases`
 - 서비스: 사용자 `price-api.service`, 운영 포트 `127.0.0.1:4382`
 - WorkingDirectory override: `~/.config/systemd/user/price-api.service.d/80-pr15-release.conf`
@@ -17,8 +17,8 @@
 ## 운영 코드 diff
 
 ```sh
-git diff --stat 7469d467d41c5f78a29d8093e0588e34e89896e4 4b2623a22488d7038e5c132ce87a398a3f5045c8
-git diff 7469d467d41c5f78a29d8093e0588e34e89896e4 4b2623a22488d7038e5c132ce87a398a3f5045c8 -- price/notion_finance_map.py pyproject.toml requirements-test.txt
+git diff --stat 9abb308e3d9358b6f733c799ac30f88b1119fe1a f8b0b3192ce3dbc4f63eff7cf333dd0fa39f7d4a
+git diff 9abb308e3d9358b6f733c799ac30f88b1119fe1a f8b0b3192ce3dbc4f63eff7cf333dd0fa39f7d4a -- price/notion_finance_map.py pyproject.toml requirements-test.txt
 ```
 
 세 파일, 20줄 추가·11줄 삭제다. PR #21은 문자 그대로 주석만 바꾼 작업이 아니다.
@@ -28,7 +28,7 @@ git diff 7469d467d41c5f78a29d8093e0588e34e89896e4 4b2623a22488d7038e5c132ce87a39
 - `pyproject.toml`, `requirements-test.txt`: 시험용 `pytest-asyncio==1.4.0` 선언만 추가됐다. 생산 의존성은 그대로다.
 - `api.py`, `db.py`, `schema.sql`, 인증·권한·워커 코드는 diff가 없다.
 
-이 준비 PR의 스크립트는 검수된 작업 트리에서 실행한다. 만들어지는 운영 소스는 준비 PR의 head가 아니라 위에 고정한 `4b26`이다.
+이 준비 PR의 스크립트는 검수된 작업 트리에서 실행한다. 만들어지는 운영 소스는 준비 PR의 head가 아니라 위에 고정한 `f8b0b319`이다.
 
 ## 전환 없는 준비
 
@@ -37,7 +37,7 @@ cd /home/jm/orca/lanes/price
 python scripts/prepare_release.py \
   --repo /home/jm/orca/lanes/price \
   --releases-root /home/jm/.local/share/price/releases \
-  --commit 4b2623a22488d7038e5c132ce87a398a3f5045c8
+  --commit f8b0b3192ce3dbc4f63eff7cf333dd0fa39f7d4a
 ```
 
 Git의 정확한 커밋 archive만 풀고 `.price-release.json`으로 소스 해시를 묶는다. 작업 트리의 미추적 DB·세션·환경 파일은 복사하지 않는다. archive에 그런 파일이나 symlink가 있으면 거부한다.
@@ -49,7 +49,7 @@ Git의 정확한 커밋 archive만 풀고 `.price-release.json`으로 소스 해
 python scripts/prepare_release.py \
   --repo /home/jm/orca/lanes/price \
   --releases-root /home/jm/.local/share/price/releases \
-  --commit 4b2623a22488d7038e5c132ce87a398a3f5045c8 \
+  --commit f8b0b3192ce3dbc4f63eff7cf333dd0fa39f7d4a \
   --verify-only
 ```
 
@@ -61,7 +61,7 @@ python scripts/prepare_release.py \
 /home/jm/.local/share/price/releases/779a8391915d2b6af5a5295b32e25d2d768980ac/.venv/bin/python \
   scripts/release_health_smoke.py \
   --repo /home/jm/orca/lanes/price \
-  --release /home/jm/.local/share/price/releases/4b2623a22488d7038e5c132ce87a398a3f5045c8 \
+  --release /home/jm/.local/share/price/releases/f8b0b3192ce3dbc4f63eff7cf333dd0fa39f7d4a \
   --python /home/jm/.local/share/price/releases/779a8391915d2b6af5a5295b32e25d2d768980ac/.venv/bin/python
 ```
 
@@ -87,7 +87,7 @@ systemctl --user show price-api.service -p MainPID -p ActiveState -p WorkingDire
 
 ```ini
 [Service]
-WorkingDirectory=/home/jm/.local/share/price/releases/4b2623a22488d7038e5c132ce87a398a3f5045c8
+WorkingDirectory=/home/jm/.local/share/price/releases/f8b0b3192ce3dbc4f63eff7cf333dd0fa39f7d4a
 ```
 
 ```sh
@@ -105,7 +105,7 @@ curl --include --max-time 10 http://127.0.0.1:4382/health
 
 ```ini
 [Service]
-WorkingDirectory=/home/jm/.local/share/price/releases/7469d467d41c5f78a29d8093e0588e34e89896e4
+WorkingDirectory=/home/jm/.local/share/price/releases/9abb308e3d9358b6f733c799ac30f88b1119fe1a
 ```
 
 그다음 위의 `daemon-reload`, `restart`, 상태 조회와 운영 `/health` 확인을 수행한다. 이번 릴리스는 스키마를 바꾸지 않으므로 소스 롤백을 이유로 회사 DB를 초기화·덮어쓰기·복원하지 않는다.

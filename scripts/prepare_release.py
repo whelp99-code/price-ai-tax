@@ -16,7 +16,7 @@ import tarfile
 from pathlib import Path, PurePosixPath
 from typing import Final, TypedDict
 
-TARGET: Final = "4b2623a22488d7038e5c132ce87a398a3f5045c8"
+TARGET: Final = "f8b0b3192ce3dbc4f63eff7cf333dd0fa39f7d4a"
 MANIFEST: Final = ".price-release.json"
 ROOT: Final = Path(__file__).resolve().parents[1]
 
