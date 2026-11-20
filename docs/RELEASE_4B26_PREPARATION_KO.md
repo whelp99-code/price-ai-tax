@@ -1,4 +1,6 @@
-# 4b26 릴리스 준비와 별도 운영 전환 절차
+# f8b0b319 릴리스 준비와 별도 운영 전환 절차
+
+> 과거 기록: 파일 이름의 `4b26`과 아래 `7469` 폴더 venv 문장은 이전 준비(PR #21 기준)의 기록이다. 이번 대상은 `f8b0b319`, 롤백 대상은 `9abb308e`다.
 
 이 문서는 `jm-omachy`의 준비 작업과 Cursor 검수 후 수행할 운영 전환을 구분한다. 준비 스크립트는 릴리스 폴더만 생성한다. unit, 서비스, 회사 DB, 계정, 키, Notion은 변경하지 않는다.
 
@@ -12,21 +14,26 @@
 - 공유 실행기 override: `90-venv.conf`; 실행기는 `779a8391915d2b6af5a5295b32e25d2d768980ac/.venv/bin/python` 그대로다.
 
 이전 기록: [Issue #10 마지막 배포·롤백 댓글](https://github.com/whelp99-code/price-ai-tax/issues/10#issuecomment-6085523274).
-`7469` 폴더에는 자체 `.venv`가 없으며 이번 준비도 새 venv나 키를 만들지 않는다. 새 폴더를 가리키는 symlink나 service override도 만들지 않는다.
+(과거 기록) `7469` 폴더에는 자체 `.venv`가 없었다. 현재 운영 `9abb308e` 폴더에도 자체 `.venv`가 없다. 이번 준비도 새 venv나 키를 만들지 않는다. 새 폴더를 가리키는 symlink나 service override도 만들지 않는다.
 
 ## 운영 코드 diff
 
 ```sh
 git diff --stat 9abb308e3d9358b6f733c799ac30f88b1119fe1a f8b0b3192ce3dbc4f63eff7cf333dd0fa39f7d4a
-git diff 9abb308e3d9358b6f733c799ac30f88b1119fe1a f8b0b3192ce3dbc4f63eff7cf333dd0fa39f7d4a -- price/notion_finance_map.py pyproject.toml requirements-test.txt
+git diff --numstat 9abb308e3d9358b6f733c799ac30f88b1119fe1a f8b0b3192ce3dbc4f63eff7cf333dd0fa39f7d4a -- price pyproject.toml requirements.txt requirements-test.txt requirements-readers.lock
 ```
 
-세 파일, 20줄 추가·11줄 삭제다. PR #21은 문자 그대로 주석만 바꾼 작업이 아니다.
+두 커밋 트리의 직접 비교다. `9abb308e`는 `f8b0b319`의 조상이 아니므로 선형 이력이 아니라 트리 차이로 읽는다.
 
-- `price/notion_finance_map.py`: 타입 선언 외에 import 경로와 `properties`·처리일 조회 결과를 캐시하는 실행 코드가 바뀌었다.
-- 금액 계산식, 세액 판단 분기, 격리 사유와 외부 승인 대조 로직은 바뀌지 않았다. 기존 실제 스냅샷과 입력 변형 비교 결과도 동일했다.
-- `pyproject.toml`, `requirements-test.txt`: 시험용 `pytest-asyncio==1.4.0` 선언만 추가됐다. 생산 의존성은 그대로다.
-- `api.py`, `db.py`, `schema.sql`, 인증·권한·워커 코드는 diff가 없다.
+- 운영 경로(`price/`, `pyproject.toml`, `requirements*`): 22파일, 849줄 추가·99줄 삭제.
+- `price/api.py`(+1)와 `price/service.py`(+9/−1)는 다르다.
+- `price/db.py`와 `price/schema.sql`은 두 커밋에서 blob 해시가 같다.
+- 운영 diff 본문에서 `CREATE`/`ALTER`/`DROP`/migration 문자열을 grep한 결과는 0건이다. 이는 문자열 검사이며 실행 경로 검토는 아니다.
+- `pyproject.toml`(+2/−2)과 `requirements-test.txt`(+1)도 바뀐다. `requirements.txt`는 같다.
+- 변경 파일별 의미 검토는 이 문서에서 하지 않는다. 각 병합 PR의 검수 기록을 따른다.
+- 현재 운영 폴더 `releases/9abb308e…`의 `price/`·`pyproject.toml`·`requirements.txt` 88개 파일은 커밋 `9abb308e`의 blob 해시와 모두 같다(2026-11-20 확인).
+
+(과거 기록) PR #21 때의 「세 파일, 20줄 추가·11줄 삭제」「`api.py` diff 없음」 설명은 `7469`→`4b26` 비교였으며 이번 대상에는 적용하지 않는다.
 
 이 준비 PR의 스크립트는 검수된 작업 트리에서 실행한다. 만들어지는 운영 소스는 준비 PR의 head가 아니라 위에 고정한 `f8b0b319`이다.
 
@@ -76,7 +83,7 @@ python scripts/prepare_release.py \
 
 ## Cursor 검수 후 별도 배포 담당자가 수행할 전환
 
-아래 단계는 준비/검증 작업에서는 실행하지 않는다. 기존 회사 백업의 성공 상태와 현 운영 WorkingDirectory를 먼저 확인한다.
+아래 단계는 준비/검증 작업에서는 실행하지 않는다. 기존 회사 백업의 성공 상태와 현 운영 WorkingDirectory를 먼저 확인한다. 전환 직전 WorkingDirectory가 `releases/9abb308e3d9358b6f733c799ac30f88b1119fe1a`가 아니면 전환을 멈추고 롤백 대상을 다시 정한다.
 
 ```sh
 systemctl --user show price-company-backup.service -p Result -p ExecMainStatus
@@ -97,7 +104,7 @@ systemctl --user show price-api.service -p MainPID -p ActiveState -p WorkingDire
 curl --include --max-time 10 http://127.0.0.1:4382/health
 ```
 
-일반 운영 `serve`는 기존 SQLite 초기화 경로를 수행한다. 따라서 이 재기동은 운영 DB 쓰기가 승인된 별도 배포 단계다. 이번 target에는 schema 변경이나 새 migration이 없으며 `init`, owner 재생성, 키 생성은 필요하지 않다.
+일반 운영 `serve`는 기존 SQLite 초기화 경로를 수행한다. 따라서 이 재기동은 운영 DB 쓰기가 승인된 별도 배포 단계다. 이번 target은 `db.py`·`schema.sql`이 롤백 대상과 같고 위 문자열 검사에서 DDL이 0건이며, `init`, owner 재생성, 키 생성은 필요하지 않다.
 
 ## 롤백
 
@@ -108,5 +115,5 @@ curl --include --max-time 10 http://127.0.0.1:4382/health
 WorkingDirectory=/home/jm/.local/share/price/releases/9abb308e3d9358b6f733c799ac30f88b1119fe1a
 ```
 
-그다음 위의 `daemon-reload`, `restart`, 상태 조회와 운영 `/health` 확인을 수행한다. 이번 릴리스는 스키마를 바꾸지 않으므로 소스 롤백을 이유로 회사 DB를 초기화·덮어쓰기·복원하지 않는다.
+그다음 위의 `daemon-reload`, `restart`, 상태 조회와 운영 `/health` 확인을 수행한다. `db.py`·`schema.sql`이 같으므로 소스 롤백을 이유로 회사 DB를 초기화·덮어쓰기·복원하지 않는다.
 새 릴리스 폴더는 준비된 소스로 남겨 조사할 수 있으며, 기존 릴리스를 삭제하지 않는다.
